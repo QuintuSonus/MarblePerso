@@ -33,14 +33,12 @@ function resolveWallCollision(m, col) {
 function physicsStep() {
   var subSteps = 3;
   for (var sub = 0; sub < subSteps; sub++) {
-    // Gravity + velocity
     for (var i = 0; i < physMarbles.length; i++) {
       var m = physMarbles[i];
       m.vy += PHYS_GRAVITY * S / subSteps;
       m.vx *= PHYS_DAMPING; m.vy *= PHYS_DAMPING;
       m.x += m.vx / subSteps; m.y += m.vy / subSteps;
     }
-    // Marble-marble collisions
     for (var i = 0; i < physMarbles.length; i++) {
       for (var j = i + 1; j < physMarbles.length; j++) {
         var a = physMarbles[i], b = physMarbles[j];
@@ -61,7 +59,6 @@ function physicsStep() {
         }
       }
     }
-    // Funnel wall collisions
     for (var i = 0; i < physMarbles.length; i++) {
       var m = physMarbles[i];
       for (var w = 0; w < funnelWalls.length; w++) {
@@ -71,7 +68,6 @@ function physicsStep() {
     }
   }
 
-  // Exit through funnel bottom onto belt
   var exitY = L.funnelBot;
   var exitL = L.funnelCx - L.funnelOpenW / 2;
   var exitR = L.funnelCx + L.funnelOpenW / 2;
@@ -101,11 +97,14 @@ function physicsStep() {
 function spawnPhysMarbles(box) {
   box.spawning = true; box.spawnIdx = 0;
   var count = box.remaining;
+  var blockerCount = box.blockerCount || 0;
+  var blockerStart = MRB_PER_BOX - blockerCount; // SNAKE_ORDER index where blockers begin
   for (var idx = 0; idx < count; idx++) {
-    (function (i, b) {
+    (function (i, b, bStart) {
       setTimeout(function () {
         if (b.remaining <= 0) return;
-        var si = SNAKE_ORDER[MRB_PER_BOX - b.remaining];
+        var spawnIdx = MRB_PER_BOX - b.remaining;
+        var si = SNAKE_ORDER[spawnIdx];
         b.remaining--;
         b.spawnIdx = MRB_PER_BOX - b.remaining;
         var MR = getMR();
@@ -115,14 +114,16 @@ function spawnPhysMarbles(box) {
         var my = b.y + L.bh / 2 + (si.r - 1) * mgY - 2 * S;
         var vx = (Math.random() - 0.5) * 2 * S;
         var vy = -(2 + Math.random() * 2) * S;
-        physMarbles.push({ x: mx, y: my, vx: vx, vy: vy, ci: b.ci, r: MR, spawnT: 1.0 });
+        // Blocker boxes: last blockerCount marbles are blocker colored
+        var marbleCi = (blockerCount > 0 && spawnIdx >= bStart) ? BLOCKER_CI : b.ci;
+        physMarbles.push({ x: mx, y: my, vx: vx, vy: vy, ci: marbleCi, r: MR, spawnT: 1.0 });
         sfx.drop();
-        spawnBurst(mx, my, COLORS[b.ci].fill, 4);
+        spawnBurst(mx, my, COLORS[marbleCi].fill, 4);
         if (b.remaining <= 0) {
           b.emptyT = 1.0;
           setTimeout(function () { b.used = true; b.spawning = false; }, 300);
         }
       }, i * 120);
-    })(idx, box);
+    })(idx, box, blockerStart);
   }
 }

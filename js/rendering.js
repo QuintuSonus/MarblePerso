@@ -78,6 +78,26 @@ function drawBoxMarbles(ci, remaining) {
   }
 }
 
+// Draw marbles inside a blocker box: last blockerCount positions are blocker colored
+function drawBoxMarblesWithBlockers(ci, remaining, blockerCount) {
+  if (remaining <= 0) return;
+  var mr = Math.min(7 * S, L.bw / 8.5);
+  var mg = Math.min(14 * S, L.bw / 4.2);
+  var mgY = mg * MRB_GAP_FACTOR;
+  var gone = MRB_PER_BOX - remaining;
+  var blockerStart = MRB_PER_BOX - blockerCount;
+  var mrbsToDraw = [];
+  for (var si = gone; si < MRB_PER_BOX; si++) {
+    mrbsToDraw.push({ r: SNAKE_ORDER[si].r, c: SNAKE_ORDER[si].c, isBlocker: si >= blockerStart });
+  }
+  mrbsToDraw.sort(function (a, b) { return a.r - b.r; });
+  for (var si = 0; si < mrbsToDraw.length; si++) {
+    var sp = mrbsToDraw[si];
+    var mci = sp.isBlocker ? BLOCKER_CI : ci;
+    drawMarble((sp.c - 1) * mg, (sp.r - 1) * mgY - 2 * S, mr, mci);
+  }
+}
+
 function drawBoxLip(ci) {
   ctx.save();
   var lipH = L.bh * LIP_PCT;
@@ -195,7 +215,26 @@ function drawStock() {
       if (isBoxTappable(i) && b.hoverT > 0.01) { ctx.shadowColor = c.glow; ctx.shadowBlur = 20 * S * b.hoverT; }
       drawBox(-L.bw / 2, -L.bh / 2, L.bw, L.bh, b.ci);
       ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0;
-      if (b.remaining > 0) { drawBoxMarbles(b.ci, b.remaining); drawBoxLip(b.ci); }
+      // Blocker box: subtle stripe overlay on open box
+      if (b.boxType === 'blocker' && b.blockerCount > 0) {
+        ctx.save();
+        ctx.globalAlpha = 0.06;
+        ctx.beginPath(); rRect(-L.bw / 2, -L.bh / 2, L.bw, L.bh, 6 * S); ctx.clip();
+        ctx.strokeStyle = COLORS[BLOCKER_CI].fill; ctx.lineWidth = 2 * S;
+        var sg = 8 * S;
+        for (var d = -L.bw; d < L.bw + L.bh; d += sg) {
+          ctx.beginPath(); ctx.moveTo(-L.bw / 2 + d, -L.bh / 2); ctx.lineTo(-L.bw / 2 + d - L.bh, L.bh / 2); ctx.stroke();
+        }
+        ctx.restore();
+      }
+      if (b.remaining > 0) {
+        if (b.boxType === 'blocker' && b.blockerCount > 0) {
+          drawBoxMarblesWithBlockers(b.ci, b.remaining, b.blockerCount);
+        } else {
+          drawBoxMarbles(b.ci, b.remaining);
+        }
+        drawBoxLip(b.ci);
+      }
     }
 
     // ── Ice overlay (drawn on top of the box) ──
@@ -245,9 +284,95 @@ function drawBelt() {
     if (slot.marble >= 0) {
       var bs = 1;
       if (slot.arriveAnim > 0) { var t2 = 1 - slot.arriveAnim; bs = 1 + Math.sin(t2 * Math.PI * 3) * 0.3 * slot.arriveAnim; }
+      // Collection animation: blocker marbles pulse and shrink
+      if (slot.marble === BLOCKER_CI && blockerCollecting && blockerCollectT > 0.5) {
+        var ct = (blockerCollectT - 0.5) * 2; // 1.0 → 0.0
+        var pulse = 1 + Math.sin((1 - ct) * Math.PI * 8) * 0.2;
+        bs *= pulse;
+        // Glow ring
+        ctx.save();
+        ctx.globalAlpha = 0.3 + Math.sin((1 - ct) * Math.PI * 6) * 0.25;
+        ctx.fillStyle = COLORS[BLOCKER_CI].glow;
+        ctx.beginPath(); ctx.arc(pos.x, pos.y, slotR * 1.6 * pulse, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+      }
       drawMarble(pos.x, pos.y, slotR * 0.8 * cal.marble.s, slot.marble, bs);
     }
   }
+}
+
+// ── Blocker progress indicator (in-world, between belt and sort) ──
+
+function drawBlockerProgress() {
+  if (totalBlockerMarbles <= 0) return;
+
+  var cx = L.beltCx;
+  var cy = (L.beltBotY + L.sTop) / 2;
+  var total = totalBlockerMarbles;
+  var filled = blockersOnBelt;
+  var dotR = 3.5 * S;
+  var gap = dotR * 3;
+  var startX = cx - (total - 1) * gap / 2;
+
+  // Background pill shape
+  var pillW = Math.max((total - 1) * gap + dotR * 5, dotR * 6);
+  var pillH = dotR * 3.2;
+  ctx.save();
+  ctx.fillStyle = 'rgba(122,112,104,0.10)';
+  rRect(cx - pillW / 2, cy - pillH / 2, pillW, pillH, pillH / 2); ctx.fill();
+  ctx.strokeStyle = 'rgba(122,112,104,0.18)'; ctx.lineWidth = 1 * S;
+  rRect(cx - pillW / 2, cy - pillH / 2, pillW, pillH, pillH / 2); ctx.stroke();
+
+  // Small blocker icon on left
+  var iconX = cx - pillW / 2 - dotR * 2.5;
+  var bc = COLORS[BLOCKER_CI];
+  ctx.globalAlpha = 0.4;
+  var icGrd = ctx.createRadialGradient(iconX, cy, 0, iconX, cy, dotR * 1.1);
+  icGrd.addColorStop(0, bc.light); icGrd.addColorStop(1, bc.dark);
+  ctx.fillStyle = icGrd;
+  ctx.beginPath(); ctx.arc(iconX, cy, dotR * 1.1, 0, Math.PI * 2); ctx.fill();
+  ctx.globalAlpha = 1;
+
+  // Progress dots
+  for (var i = 0; i < total; i++) {
+    var dx = startX + i * gap;
+
+    if (i < filled) {
+      // Filled blocker dot
+      var grd = ctx.createRadialGradient(dx - dotR * 0.15, cy - dotR * 0.15, dotR * 0.1, dx, cy, dotR);
+      grd.addColorStop(0, bc.light); grd.addColorStop(0.7, bc.fill); grd.addColorStop(1, bc.dark);
+      ctx.fillStyle = grd;
+      ctx.beginPath(); ctx.arc(dx, cy, dotR, 0, Math.PI * 2); ctx.fill();
+      // Shine
+      ctx.fillStyle = 'rgba(255,255,255,0.25)';
+      ctx.beginPath(); ctx.arc(dx - dotR * 0.2, cy - dotR * 0.2, dotR * 0.35, 0, Math.PI * 2); ctx.fill();
+
+      // Collection glow
+      if (blockerCollecting && blockerCollectT > 0.5) {
+        ctx.globalAlpha = 0.4 + Math.sin(tick * 0.2 + i * 0.5) * 0.3;
+        ctx.fillStyle = bc.glow;
+        ctx.beginPath(); ctx.arc(dx, cy, dotR * 2, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+    } else {
+      // Empty outline dot
+      ctx.strokeStyle = 'rgba(122,112,104,0.22)'; ctx.lineWidth = 1 * S;
+      ctx.setLineDash([2 * S, 2 * S]);
+      ctx.beginPath(); ctx.arc(dx, cy, dotR * 0.65, 0, Math.PI * 2); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+
+  // "All collected!" flash during collection
+  if (blockerCollecting && blockerCollectT <= 0.5 && blockerCollectT > 0) {
+    var flashAlpha = blockerCollectT * 2;
+    ctx.globalAlpha = flashAlpha * 0.6;
+    ctx.fillStyle = 'rgba(255,255,255,0.8)';
+    rRect(cx - pillW / 2, cy - pillH / 2, pillW, pillH, pillH / 2); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  ctx.restore();
 }
 
 // ── Jumpers ──

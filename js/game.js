@@ -56,6 +56,8 @@ function goNextLevel() {
 // === GAME INIT ===
 function initGame() {
   won = false; score = 0; particles = []; physMarbles = []; jumpers = []; tick = 0; hoverIdx = -1;
+  totalBlockerMarbles = 0; blockersOnBelt = 0; blockerCollecting = false; blockerCollectT = 0;
+  blockerCollectSlots = []; blockerCollectCleared = false;
   document.getElementById('win-screen').classList.remove('show');
   computeLayout(); initBeltSlots();
 
@@ -87,14 +89,20 @@ function initGame() {
     for (var i = 0; i < totalBoxes; i++) boxSlots[slotIndices[i]] = { ci: cl[i], boxType: 'default' };
   }
 
-  // ── Count per color for sort columns ──
-  var colorCounts = [];
-  for (var c = 0; c < NUM_COLORS; c++) colorCounts.push(0);
-  for (var k in boxSlots) colorCounts[boxSlots[k].ci]++;
+  // ── Count regular marbles per color for sort columns ──
+  // Blocker boxes contribute fewer regular marbles (MRB_PER_BOX - BLOCKER_PER_BOX)
+  var colorMarblesTotal = [];
+  for (var c = 0; c < NUM_COLORS; c++) colorMarblesTotal.push(0);
+  for (var k in boxSlots) {
+    var bs = boxSlots[k];
+    var isBlockerBox = (bs.boxType === 'blocker');
+    var regularPerBox = isBlockerBox ? (MRB_PER_BOX - BLOCKER_PER_BOX) : MRB_PER_BOX;
+    colorMarblesTotal[bs.ci] += regularPerBox;
+    if (isBlockerBox) totalBlockerMarbles += BLOCKER_PER_BOX;
+  }
   var sortPerColor = [];
   for (var c = 0; c < NUM_COLORS; c++) {
-    var totalMrb = colorCounts[c] * MRB_PER_BOX;
-    sortPerColor.push(SORT_CAP > 0 ? Math.ceil(totalMrb / SORT_CAP) : 0);
+    sortPerColor.push(SORT_CAP > 0 ? Math.ceil(colorMarblesTotal[c] / SORT_CAP) : 0);
   }
 
   // ── Build stock ──
@@ -105,17 +113,19 @@ function initGame() {
     if (!slot) {
       stock.push({ ci: 0, used: false, remaining: 0, spawning: false, spawnIdx: 0,
         revealed: true, empty: true, boxType: 'default',
-        iceHP: 0, iceCrackT: 0, iceShatterT: 0,
+        iceHP: 0, iceCrackT: 0, iceShatterT: 0, blockerCount: 0,
         x: L.sx + c * (L.bw + L.bg), y: L.sy + r * (L.bh + L.bg),
         shakeT: 0, hoverT: 0, popT: 0, revealT: 0, emptyT: 0, idlePhase: 0 });
     } else {
       var isIce = (slot.boxType === 'ice');
+      var isBlocker = (slot.boxType === 'blocker');
       stock.push({ ci: slot.ci, used: false, remaining: MRB_PER_BOX, spawning: false, spawnIdx: 0,
         revealed: isIce ? true : false, empty: false,
         boxType: slot.boxType || 'default',
         iceHP: isIce ? 2 : 0,
         iceCrackT: 0,     // animation timer for crack effect
         iceShatterT: 0,   // animation timer for final shatter
+        blockerCount: isBlocker ? BLOCKER_PER_BOX : 0,
         x: L.sx + c * (L.bw + L.bg), y: L.sy + r * (L.bh + L.bg),
         shakeT: 0, hoverT: 0, popT: 0, revealT: 0, emptyT: 0,
         idlePhase: Math.random() * Math.PI * 2 });
@@ -326,6 +336,63 @@ function update() {
     }
   }
 
+  // ── Blocker marble collection ──
+  if (totalBlockerMarbles > 0) {
+    if (!blockerCollecting) {
+      // Count blocker marbles currently on belt
+      blockersOnBelt = 0;
+      for (var si = 0; si < BELT_SLOTS; si++) {
+        if (beltSlots[si].marble === BLOCKER_CI) blockersOnBelt++;
+      }
+      // Check if all blocker marbles are on the belt
+      if (blockersOnBelt >= totalBlockerMarbles) {
+        blockerCollecting = true;
+        blockerCollectT = 1.0;
+        blockerCollectCleared = false;
+        blockerCollectSlots = [];
+        for (var si = 0; si < BELT_SLOTS; si++) {
+          if (beltSlots[si].marble === BLOCKER_CI) blockerCollectSlots.push(si);
+        }
+        sfx.complete();
+      }
+    } else {
+      // Animate collection
+      blockerCollectT -= 0.018;
+      // At midpoint: clear all blocker marbles and spawn big particle burst
+      if (blockerCollectT <= 0.5 && !blockerCollectCleared) {
+        blockerCollectCleared = true;
+        for (var k = 0; k < blockerCollectSlots.length; k++) {
+          var csi = blockerCollectSlots[k];
+          if (beltSlots[csi].marble === BLOCKER_CI) {
+            var cpos = getSlotPos(csi);
+            beltSlots[csi].marble = -1;
+            spawnBurst(cpos.x, cpos.y, COLORS[BLOCKER_CI].light, 10);
+            // Sparkle trail toward center
+            for (var p = 0; p < 3; p++) {
+              var a = Math.random() * Math.PI * 2, sp = 1 + Math.random() * 2;
+              particles.push({ x: cpos.x, y: cpos.y,
+                vx: (L.beltCx - cpos.x) * 0.03 + Math.cos(a) * sp * S,
+                vy: ((L.beltTopY + L.beltBotY) / 2 - cpos.y) * 0.03 + Math.sin(a) * sp * S,
+                r: (2 + Math.random() * 3) * S, color: '#fff', life: 0.8, decay: 0.03, grav: false });
+            }
+          }
+        }
+        // Central celebration burst
+        var bcx = L.beltCx, bcy = (L.beltTopY + L.beltBotY) / 2;
+        spawnBurst(bcx, bcy, '#A89E94', 20);
+        spawnConfetti(bcx, bcy, 25);
+        sfx.win();
+        blockersOnBelt = 0;
+      }
+      // End collection
+      if (blockerCollectT <= 0) {
+        blockerCollecting = false;
+        blockerCollectT = 0;
+        blockerCollectSlots = [];
+      }
+    }
+  }
+
   // Stock animations
   for (var i = 0; i < stock.length; i++) {
     var b = stock[i];
@@ -408,6 +475,7 @@ function frame() {
     drawStock();
     drawPhysMarbles();
     drawBelt();
+    drawBlockerProgress();
     drawJumpers();
     drawSortArea();
     drawBackButton();

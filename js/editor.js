@@ -168,14 +168,21 @@ function editorClearAll() {
 // ── Stats ──
 function editorUpdateStats() {
   var counts = [];
-  for (var c = 0; c < NUM_COLORS; c++) counts.push(0);
-  var total = 0, typeCounts = {};
+  var regularMrb = []; // actual regular marbles per color (accounting for blockers)
+  for (var c = 0; c < NUM_COLORS; c++) { counts.push(0); regularMrb.push(0); }
+  var total = 0, typeCounts = {}, totalBlockers = 0;
   for (var i = 0; i < 49; i++) {
     var v = editor.grid[i];
     if (v && v.ci >= 0) {
       counts[v.ci]++;
       total++;
       typeCounts[v.type] = (typeCounts[v.type] || 0) + 1;
+      if (v.type === 'blocker') {
+        regularMrb[v.ci] += Math.max(0, editor.mrbPerBox - BLOCKER_PER_BOX);
+        totalBlockers += BLOCKER_PER_BOX;
+      } else {
+        regularMrb[v.ci] += editor.mrbPerBox;
+      }
     }
   }
   var el = document.getElementById('ed-stats');
@@ -187,6 +194,10 @@ function editorUpdateStats() {
       html += '<span class="ed-stat-chip" style="background:' + BoxTypes[tid].editorColor + '">' + typeCounts[tid] + ' ' + BoxTypes[tid].label.toLowerCase() + '</span>';
     }
   }
+  // Show blocker marble count if any
+  if (totalBlockers > 0) {
+    html += '<span class="ed-stat-chip" style="background:' + COLORS[BLOCKER_CI].fill + '">' + totalBlockers + ' blocker mrb</span>';
+  }
   for (var c = 0; c < NUM_COLORS; c++) {
     if (counts[c] > 0) html += '<span class="ed-stat-chip" style="background:' + COLORS[c].fill + '">' + counts[c] + '</span>';
   }
@@ -194,14 +205,18 @@ function editorUpdateStats() {
   if (total === 0) {
     warn = 'Place some boxes to create a level';
   } else {
+    // Validate regular marble divisibility by sort cap
     for (var c = 0; c < NUM_COLORS; c++) {
-      if (counts[c] > 0) {
-        var totalMrb = counts[c] * editor.mrbPerBox;
-        if (totalMrb % editor.sortCap !== 0) {
-          warn = CLR_NAMES[c] + ' marbles (' + totalMrb + ') not divisible by sort cap (' + editor.sortCap + ')';
+      if (regularMrb[c] > 0) {
+        if (regularMrb[c] % editor.sortCap !== 0) {
+          warn = CLR_NAMES[c] + ' regular marbles (' + regularMrb[c] + ') not divisible by sort cap (' + editor.sortCap + ')';
           break;
         }
       }
+    }
+    // Validate blocker marble count is a multiple of 3
+    if (!warn && totalBlockers > 0 && totalBlockers % 3 !== 0) {
+      warn = 'Total blocker marbles (' + totalBlockers + ') must be a multiple of 3';
     }
   }
   if (warn) html += '<span class="ed-stat-warn">' + warn + '</span>';
