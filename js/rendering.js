@@ -5,6 +5,7 @@
 // Open (tappable) state is the same for all box types.
 // Ice overlay is drawn on top of revealed boxes with iceHP > 0.
 // Tunnel entries are drawn via drawTunnelOnGrid.
+// Wall cells are drawn via drawWallOnGrid.
 // ============================================================
 
 function rRect(x, y, w, h, r) {
@@ -156,7 +157,7 @@ function drawFunnel() {
   ctx.restore();
 }
 
-// ── Stock grid — delegates to registered box types, handles tunnels ──
+// ── Stock grid — delegates to registered box types, handles tunnels + walls ──
 
 function drawStock() {
   for (var i = 0; i < stock.length; i++) {
@@ -167,6 +168,12 @@ function drawStock() {
       var tRemain = b.tunnelContents ? b.tunnelContents.length : 0;
       drawTunnelOnGrid(ctx, b.x, b.y, L.bw, L.bh, S,
         b.tunnelDir, tRemain, b.tunnelTotal, tick, b.tunnelSpawning);
+      continue;
+    }
+
+    // ── Wall ──
+    if (b.isWall) {
+      drawWallOnGrid(ctx, b.x, b.y, L.bw, L.bh, S, tick);
       continue;
     }
 
@@ -433,9 +440,10 @@ function drawSortArea() {
     }
     if (visibleBoxes.length > 0) {
       var topBox = visibleBoxes[0];
-      ctx.fillStyle = topBox.type === 'lock' ? 'rgba(200,170,80,0.5)' : (COLORS[topBox.ci].fill + '60');
-      var ax = x + L.sBw / 2, ay = L.sTop - 4 * S;
-      ctx.beginPath(); ctx.moveTo(ax - 5 * S, ay - 4 * S); ctx.lineTo(ax + 5 * S, ay - 4 * S); ctx.lineTo(ax, ay + 3 * S); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = topBox.type === 'lock' ? 'rgba(200,180,100,0.6)' : 'rgba(120,100,80,0.3)';
+      ctx.font = 'bold ' + (8 * S) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      var label = topBox.type === 'lock' ? '\uD83D\uDD13' : visibleBoxes.length.toString();
+      ctx.fillText(label, x + L.sBw / 2, L.sTop - 8 * S);
     }
   }
 }
@@ -443,29 +451,19 @@ function drawSortArea() {
 // ── Back button ──
 
 function drawBackButton() {
-  var bx = L.bkX, by = L.bkY, bs = L.bkSize;
   ctx.save();
-  ctx.shadowColor = 'rgba(0,0,0,0.2)'; ctx.shadowBlur = 4 * S; ctx.shadowOffsetY = 2 * S;
-  ctx.fillStyle = 'rgba(160,130,100,0.8)';
-  rRect(bx, by, bs, bs, 10 * S); ctx.fill();
+  ctx.fillStyle = 'rgba(160,130,100,0.7)';
+  ctx.shadowColor = 'rgba(0,0,0,0.15)'; ctx.shadowBlur = 4 * S; ctx.shadowOffsetY = 2 * S;
+  rRect(L.bkX, L.bkY, L.bkSize, L.bkSize, 8 * S); ctx.fill();
   ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
-  ctx.strokeStyle = '#fff'; ctx.lineWidth = 3 * S; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-  var cx = bx + bs / 2, cy = by + bs / 2, ar = bs * 0.22;
-  ctx.beginPath(); ctx.moveTo(cx + ar * 0.3, cy - ar); ctx.lineTo(cx - ar * 0.5, cy); ctx.lineTo(cx + ar * 0.3, cy + ar); ctx.stroke();
+  ctx.fillStyle = 'white'; ctx.font = 'bold ' + (L.bkSize * 0.5) + 'px sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('\u2190', L.bkX + L.bkSize / 2, L.bkY + L.bkSize / 2);
   ctx.restore();
 }
 
 // ── Debug walls ──
 
 function drawDebugWalls() {
-  if (!calVisible) return;
-  ctx.strokeStyle = 'rgba(255,0,0,0.4)'; ctx.lineWidth = 2;
-  for (var w = 0; w < funnelWalls.length; w++) {
-    ctx.beginPath(); ctx.moveTo(funnelWalls[w].x1, funnelWalls[w].y1); ctx.lineTo(funnelWalls[w].x2, funnelWalls[w].y2); ctx.stroke();
-  }
-  ctx.strokeStyle = 'rgba(0,100,255,0.3)'; ctx.lineWidth = 1; ctx.beginPath();
-  for (var i = 0; i < beltPath.length; i++) { if (i === 0) ctx.moveTo(beltPath[i].x, beltPath[i].y); else ctx.lineTo(beltPath[i].x, beltPath[i].y); }
-  ctx.closePath(); ctx.stroke();
-  ctx.strokeStyle = 'rgba(0,180,0,0.3)'; ctx.lineWidth = 1;
-  for (var c = 0; c < 4; c++) { var x = L.sSx + c * (L.sBw + L.sColGap); ctx.strokeRect(x, L.sTop, L.sBw, SORT_VISIBLE_ROWS * (L.sBh + L.sGap)); }
+  // invisible — physics walls for marble collisions
 }

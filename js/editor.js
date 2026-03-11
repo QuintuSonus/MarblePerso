@@ -1,10 +1,11 @@
 // ============================================================
 // editor.js — Level Editor (reads box types from registry)
 //             + Tunnel placement, orientation, contents editing
+//             + Wall placement
 // ============================================================
 
 var editor = {
-  grid: [],            // 7x7: null = empty, { ci: 0-7, type: 'default'|... } or { tunnel: true, dir: 'bottom', contents: [...] }
+  grid: [],            // 7x7: null = empty, { ci, type } or { tunnel: true, ... } or { wall: true }
   name: 'Custom Level',
   desc: 'My custom level',
   mrbPerBox: 9,
@@ -15,6 +16,7 @@ var editor = {
   tunnelMode: false,    // true when placing tunnels
   tunnelDir: 'bottom',  // current tunnel direction for new tunnels
   selectedTunnel: -1,   // index of selected tunnel for content editing
+  wallMode: false,      // true when placing walls
   visible: false
 };
 
@@ -31,6 +33,7 @@ function editorInit() {
   editor.tunnelMode = false;
   editor.tunnelDir = 'bottom';
   editor.selectedTunnel = -1;
+  editor.wallMode = false;
 }
 
 function showEditor(fresh) {
@@ -67,7 +70,12 @@ function editorRenderGrid() {
     var cell = document.createElement('div');
     cell.className = 'ed-cell';
     var v = editor.grid[i];
-    if (v && v.tunnel) {
+    if (v && v.wall) {
+      // Wall cell
+      cell.style.background = 'linear-gradient(135deg,#9A8D7B,#6F6355)';
+      cell.style.borderColor = '#8A7D6B';
+      cell.innerHTML = '<span class="ed-cell-dot" style="color:rgba(255,255,255,0.5);font-size:14px">&#9632;</span>';
+    } else if (v && v.tunnel) {
       // Tunnel cell
       var isSelected = (editor.selectedTunnel === i);
       cell.style.background = 'linear-gradient(135deg,#3D3548,#252030)';
@@ -97,18 +105,32 @@ function editorRenderGrid() {
 function editorCellClick(e) {
   var idx = parseInt(e.currentTarget.getAttribute('data-idx'));
 
+  if (editor.wallMode) {
+    // Wall placement mode
+    var existing = editor.grid[idx];
+    if (existing && existing.wall) {
+      // Toggle off: clicking existing wall removes it
+      editor.grid[idx] = null;
+    } else {
+      // Place wall
+      editor.grid[idx] = { wall: true };
+    }
+    if (editor.selectedTunnel === idx) editor.selectedTunnel = -1;
+    editorRenderGrid();
+    editorUpdateStats();
+    editorRenderTunnelPanel();
+    return;
+  }
+
   if (editor.tunnelMode) {
     // In tunnel mode: place or select tunnel
     var existing = editor.grid[idx];
     if (existing && existing.tunnel) {
-      // Select this tunnel for editing
       editor.selectedTunnel = idx;
     } else if (editor.activeColor === -1) {
-      // Eraser in tunnel mode
       editor.grid[idx] = null;
       if (editor.selectedTunnel === idx) editor.selectedTunnel = -1;
     } else {
-      // Place new tunnel
       editor.grid[idx] = { tunnel: true, dir: editor.tunnelDir, contents: [] };
       editor.selectedTunnel = idx;
     }
@@ -119,7 +141,7 @@ function editorCellClick(e) {
       if (editor.selectedTunnel === idx) editor.selectedTunnel = -1;
     } else {
       var existing = editor.grid[idx];
-      if (existing && !existing.tunnel && existing.ci === editor.activeColor && existing.type === editor.activeType) {
+      if (existing && !existing.tunnel && !existing.wall && existing.ci === editor.activeColor && existing.type === editor.activeType) {
         editor.grid[idx] = null;
       } else {
         editor.grid[idx] = { ci: editor.activeColor, type: editor.activeType };
@@ -147,7 +169,7 @@ function editorRenderToolbar() {
   var el = document.getElementById('ed-toolbar');
   el.innerHTML = '';
 
-  // Mode row: Box types + Tunnel toggle
+  // Mode row: Box types + Wall + Tunnel toggle
   var typeRow = document.createElement('div');
   typeRow.className = 'ed-type-row';
 
@@ -156,17 +178,32 @@ function editorRenderToolbar() {
     var id = BoxTypeOrder[t];
     var bt = BoxTypes[id];
     var tb = document.createElement('button');
-    tb.className = 'ed-type-btn' + (!editor.tunnelMode && editor.activeType === id ? ' active' : '');
+    tb.className = 'ed-type-btn' + (!editor.tunnelMode && !editor.wallMode && editor.activeType === id ? ' active' : '');
     tb.textContent = bt.label;
     tb.setAttribute('data-type', id);
     tb.addEventListener('click', function () {
       editor.activeType = this.getAttribute('data-type');
       editor.tunnelMode = false;
+      editor.wallMode = false;
       editorRenderToolbar();
       editorRenderTunnelPanel();
     });
     typeRow.appendChild(tb);
   }
+
+  // Wall mode button
+  var wallBtn = document.createElement('button');
+  wallBtn.className = 'ed-type-btn' + (editor.wallMode ? ' active' : '');
+  wallBtn.textContent = '\u25A0 Wall';
+  wallBtn.style.borderColor = editor.wallMode ? 'rgba(138,125,107,0.6)' : '';
+  wallBtn.style.color = editor.wallMode ? '#6F6355' : '';
+  wallBtn.addEventListener('click', function () {
+    editor.wallMode = true;
+    editor.tunnelMode = false;
+    editorRenderToolbar();
+    editorRenderTunnelPanel();
+  });
+  typeRow.appendChild(wallBtn);
 
   // Tunnel mode button
   var tunnelBtn = document.createElement('button');
@@ -176,6 +213,7 @@ function editorRenderToolbar() {
   tunnelBtn.style.color = editor.tunnelMode ? '#E8A84C' : '';
   tunnelBtn.addEventListener('click', function () {
     editor.tunnelMode = true;
+    editor.wallMode = false;
     editorRenderToolbar();
     editorRenderTunnelPanel();
   });
@@ -210,12 +248,18 @@ function editorRenderToolbar() {
       db.setAttribute('data-dir', dirs[d]);
       db.addEventListener('click', function () {
         editor.tunnelDir = this.getAttribute('data-dir');
-        editor.activeColor = 0; // exit eraser mode
+        editor.activeColor = 0;
         editorRenderToolbar();
       });
       dirRow.appendChild(db);
     }
     el.appendChild(dirRow);
+  } else if (editor.wallMode) {
+    // Wall mode: just show info hint
+    var wallInfo = document.createElement('div');
+    wallInfo.className = 'ed-color-row';
+    wallInfo.innerHTML = '<span style="font-size:11px;color:#9C8A70">Click cells to place/remove walls</span>';
+    el.appendChild(wallInfo);
   } else {
     // Color palette: eraser + 8 colors
     var colorRow = document.createElement('div');
@@ -310,21 +354,18 @@ function editorRenderTunnelPanel() {
   // Add box controls
   html += '<div class="ed-section-title" style="margin-top:8px"><span class="icon">&#10133;</span> Add Box to Tunnel</div>';
   html += '<div class="ed-tunnel-add-row">';
-  // Type selector for adding
   html += '<select id="ed-tunnel-add-type" class="ed-tunnel-select">';
   for (var t = 0; t < BoxTypeOrder.length; t++) {
     html += '<option value="' + BoxTypeOrder[t] + '">' + BoxTypes[BoxTypeOrder[t]].label + '</option>';
   }
   html += '</select>';
   html += '</div>';
-  // Color buttons for adding
   html += '<div class="ed-tunnel-add-colors">';
   for (var ci3 = 0; ci3 < NUM_COLORS; ci3++) {
     html += '<button class="ed-tunnel-add-clr" data-ci="' + ci3 + '" style="background:' + COLORS[ci3].fill + '" title="Add ' + CLR_NAMES[ci3] + '">' + CLR_NAMES[ci3][0].toUpperCase() + '</button>';
   }
   html += '</div>';
 
-  // Clear all button
   if (tunnel.contents.length > 0) {
     html += '<div style="text-align:center;margin-top:6px"><button class="ed-qbtn" id="ed-tunnel-clear">Clear All</button></div>';
   }
@@ -411,12 +452,16 @@ function editorUpdateStats() {
   for (var c = 0; c < NUM_COLORS; c++) { counts.push(0); regularMrb.push(0); }
   var total = 0, typeCounts = {}, totalBlockers = 0;
   var tunnelCount = 0, tunnelBoxCount = 0;
+  var wallCount = 0;
   for (var i = 0; i < 49; i++) {
     var v = editor.grid[i];
     if (!v) continue;
+    if (v.wall) {
+      wallCount++;
+      continue;
+    }
     if (v.tunnel) {
       tunnelCount++;
-      // Count marbles from tunnel contents
       if (v.contents) {
         tunnelBoxCount += v.contents.length;
         for (var tc = 0; tc < v.contents.length; tc++) {
@@ -451,6 +496,9 @@ function editorUpdateStats() {
     if (typeCounts[tid]) {
       html += '<span class="ed-stat-chip" style="background:' + BoxTypes[tid].editorColor + '">' + typeCounts[tid] + ' ' + BoxTypes[tid].label.toLowerCase() + '</span>';
     }
+  }
+  if (wallCount > 0) {
+    html += '<span class="ed-stat-chip" style="background:#8A7D6B">' + wallCount + ' wall' + (wallCount > 1 ? 's' : '') + '</span>';
   }
   if (tunnelCount > 0) {
     html += '<span class="ed-stat-chip" style="background:#3D3548;border:1px solid #6A6070">' + tunnelCount + ' tunnel' + (tunnelCount > 1 ? 's' : '') + ' (' + tunnelBoxCount + ' stored)</span>';
@@ -569,6 +617,7 @@ function editorImportJSON() {
           var cell = lvl.grid[i];
           if (cell === null || cell === undefined || cell === -1) editor.grid[i] = null;
           else if (typeof cell === 'number') editor.grid[i] = cell >= 0 ? { ci: cell, type: 'default' } : null;
+          else if (cell.wall) editor.grid[i] = { wall: true };
           else if (cell.tunnel) editor.grid[i] = { tunnel: true, dir: cell.dir || 'bottom', contents: cell.contents || [] };
           else editor.grid[i] = cell;
         }

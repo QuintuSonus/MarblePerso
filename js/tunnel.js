@@ -148,8 +148,9 @@ function getTunnelExitIdx(tunnelIdx) {
 function isTileAvailableForTunnel(idx) {
   if (idx < 0 || idx >= stock.length) return false;
   var s = stock[idx];
-  // Must be an empty slot or a fully-used box (not a tunnel, not an active box)
+  // Must be an empty slot or a fully-used box (not a tunnel, not an active box, not a wall)
   if (s.isTunnel) return false;
+  if (s.isWall) return false;  // walls block tunnel spawning
   return s.empty || s.used;
 }
 
@@ -191,6 +192,7 @@ function trySpawnFromTunnels() {
       iceShatterT: 0,
       blockerCount: isBlocker ? BLOCKER_PER_BOX : 0,
       isTunnel: false,
+      isWall: false,
       x: L.sx + exitCol * (L.bw + L.bg),
       y: L.sy + exitRow * (L.bh + L.bg),
       shakeT: 0,
