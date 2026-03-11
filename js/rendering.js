@@ -4,6 +4,7 @@
 // drawStock delegates closed/reveal states to BoxTypes registry.
 // Open (tappable) state is the same for all box types.
 // Ice overlay is drawn on top of revealed boxes with iceHP > 0.
+// Tunnel entries are drawn via drawTunnelOnGrid.
 // ============================================================
 
 function rRect(x, y, w, h, r) {
@@ -78,7 +79,6 @@ function drawBoxMarbles(ci, remaining) {
   }
 }
 
-// Draw marbles inside a blocker box: last blockerCount positions are blocker colored
 function drawBoxMarblesWithBlockers(ci, remaining, blockerCount) {
   if (remaining <= 0) return;
   var mr = Math.min(7 * S, L.bw / 8.5);
@@ -111,9 +111,7 @@ function drawBoxLip(ci) {
 function drawFunnel() {
   var exitL = L.funnelCx - L.funnelOpenW / 2;
   var exitR = L.funnelCx + L.funnelOpenW / 2;
-
   ctx.save();
-  // Funnel body fill
   ctx.beginPath();
   ctx.moveTo(L.funnelLeft, L.funnelTop);
   ctx.lineTo(L.funnelLeft, L.funnelBendY);
@@ -124,26 +122,20 @@ function drawFunnel() {
   ctx.closePath();
   ctx.fillStyle = 'rgba(180,165,145,0.12)';
   ctx.fill();
-
-  // Funnel walls
   ctx.strokeStyle = 'rgba(140,120,95,0.5)';
   ctx.lineWidth = 2.5 * S;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  // Left wall
   ctx.beginPath();
   ctx.moveTo(L.funnelLeft, L.funnelTop);
   ctx.lineTo(L.funnelLeft, L.funnelBendY);
   ctx.lineTo(exitL, L.funnelBot);
   ctx.stroke();
-  // Right wall
   ctx.beginPath();
   ctx.moveTo(L.funnelRight, L.funnelTop);
   ctx.lineTo(L.funnelRight, L.funnelBendY);
   ctx.lineTo(exitR, L.funnelBot);
   ctx.stroke();
-
-  // Bottom floor (left + right of opening)
   ctx.strokeStyle = 'rgba(140,120,95,0.35)';
   ctx.lineWidth = 2 * S;
   ctx.beginPath();
@@ -154,8 +146,6 @@ function drawFunnel() {
   ctx.moveTo(exitR, L.funnelBot);
   ctx.lineTo(W, L.funnelBot);
   ctx.stroke();
-
-  // Highlight on inner edge
   ctx.strokeStyle = 'rgba(255,255,255,0.15)';
   ctx.lineWidth = 1 * S;
   ctx.beginPath();
@@ -163,15 +153,24 @@ function drawFunnel() {
   ctx.lineTo(L.funnelLeft + 2 * S, L.funnelBendY);
   ctx.lineTo(exitL + 2 * S, L.funnelBot - 2 * S);
   ctx.stroke();
-
   ctx.restore();
 }
 
-// ── Stock grid — delegates to registered box types ──
+// ── Stock grid — delegates to registered box types, handles tunnels ──
 
 function drawStock() {
   for (var i = 0; i < stock.length; i++) {
-    var b = stock[i]; var ox = 0;
+    var b = stock[i];
+
+    // ── Tunnel ──
+    if (b.isTunnel) {
+      var tRemain = b.tunnelContents ? b.tunnelContents.length : 0;
+      drawTunnelOnGrid(ctx, b.x, b.y, L.bw, L.bh, S,
+        b.tunnelDir, tRemain, b.tunnelTotal, tick, b.tunnelSpawning);
+      continue;
+    }
+
+    var ox = 0;
     if (b.shakeT > 0) ox = Math.sin(b.shakeT * 28) * 5 * S * b.shakeT;
     var breathe = 0;
     if (!b.used && !b.spawning && b.revealT <= 0 && b.revealed && isBoxTappable(i)) {
@@ -201,21 +200,17 @@ function drawStock() {
     ctx.translate(b.x + L.bw / 2 + ox, b.y + L.bh / 2); ctx.scale(ts, ts);
 
     if (b.revealT > 0) {
-      // ── Reveal animation — delegated to box type ──
       var phase = 1 - b.revealT;
       bt.drawReveal(ctx, -L.bw / 2, -L.bh / 2, L.bw, L.bh, b.ci, S, phase, b.remaining, tick);
     } else if (!b.revealed) {
-      // ── Closed — delegated to box type ──
       var idleWobble = Math.sin(tick * 0.02 + b.idlePhase) * 0.006;
       ctx.rotate(idleWobble);
       bt.drawClosed(ctx, -L.bw / 2, -L.bh / 2, L.bw, L.bh, b.ci, S, tick, b.idlePhase);
     } else {
-      // ── Open / tappable — same for all types ──
       var c = COLORS[b.ci];
       if (isBoxTappable(i) && b.hoverT > 0.01) { ctx.shadowColor = c.glow; ctx.shadowBlur = 20 * S * b.hoverT; }
       drawBox(-L.bw / 2, -L.bh / 2, L.bw, L.bh, b.ci);
       ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0;
-      // Blocker box: subtle stripe overlay on open box
       if (b.boxType === 'blocker' && b.blockerCount > 0) {
         ctx.save();
         ctx.globalAlpha = 0.06;
@@ -237,7 +232,6 @@ function drawStock() {
       }
     }
 
-    // ── Ice overlay (drawn on top of the box) ──
     if (b.iceHP > 0) {
       var iceType = getBoxType('ice');
       if (iceType && iceType.drawIceOverlay) {
@@ -245,7 +239,6 @@ function drawStock() {
       }
     }
 
-    // ── Ice shatter flash (fading white glow after ice breaks) ──
     if (b.iceShatterT > 0) {
       ctx.save();
       ctx.globalAlpha = b.iceShatterT * 0.4;
@@ -284,12 +277,10 @@ function drawBelt() {
     if (slot.marble >= 0) {
       var bs = 1;
       if (slot.arriveAnim > 0) { var t2 = 1 - slot.arriveAnim; bs = 1 + Math.sin(t2 * Math.PI * 3) * 0.3 * slot.arriveAnim; }
-      // Collection animation: blocker marbles pulse and shrink
       if (slot.marble === BLOCKER_CI && blockerCollecting && blockerCollectT > 0.5) {
-        var ct = (blockerCollectT - 0.5) * 2; // 1.0 → 0.0
+        var ct = (blockerCollectT - 0.5) * 2;
         var pulse = 1 + Math.sin((1 - ct) * Math.PI * 8) * 0.2;
         bs *= pulse;
-        // Glow ring
         ctx.save();
         ctx.globalAlpha = 0.3 + Math.sin((1 - ct) * Math.PI * 6) * 0.25;
         ctx.fillStyle = COLORS[BLOCKER_CI].glow;
@@ -301,11 +292,10 @@ function drawBelt() {
   }
 }
 
-// ── Blocker progress indicator (in-world, between belt and sort) ──
+// ── Blocker progress indicator ──
 
 function drawBlockerProgress() {
   if (totalBlockerMarbles <= 0) return;
-
   var cx = L.beltCx;
   var cy = (L.beltBotY + L.sTop) / 2;
   var total = totalBlockerMarbles;
@@ -313,8 +303,6 @@ function drawBlockerProgress() {
   var dotR = 3.5 * S;
   var gap = dotR * 3;
   var startX = cx - (total - 1) * gap / 2;
-
-  // Background pill shape
   var pillW = Math.max((total - 1) * gap + dotR * 5, dotR * 6);
   var pillH = dotR * 3.2;
   ctx.save();
@@ -322,8 +310,6 @@ function drawBlockerProgress() {
   rRect(cx - pillW / 2, cy - pillH / 2, pillW, pillH, pillH / 2); ctx.fill();
   ctx.strokeStyle = 'rgba(122,112,104,0.18)'; ctx.lineWidth = 1 * S;
   rRect(cx - pillW / 2, cy - pillH / 2, pillW, pillH, pillH / 2); ctx.stroke();
-
-  // Small blocker icon on left
   var iconX = cx - pillW / 2 - dotR * 2.5;
   var bc = COLORS[BLOCKER_CI];
   ctx.globalAlpha = 0.4;
@@ -332,22 +318,15 @@ function drawBlockerProgress() {
   ctx.fillStyle = icGrd;
   ctx.beginPath(); ctx.arc(iconX, cy, dotR * 1.1, 0, Math.PI * 2); ctx.fill();
   ctx.globalAlpha = 1;
-
-  // Progress dots
   for (var i = 0; i < total; i++) {
     var dx = startX + i * gap;
-
     if (i < filled) {
-      // Filled blocker dot
       var grd = ctx.createRadialGradient(dx - dotR * 0.15, cy - dotR * 0.15, dotR * 0.1, dx, cy, dotR);
       grd.addColorStop(0, bc.light); grd.addColorStop(0.7, bc.fill); grd.addColorStop(1, bc.dark);
       ctx.fillStyle = grd;
       ctx.beginPath(); ctx.arc(dx, cy, dotR, 0, Math.PI * 2); ctx.fill();
-      // Shine
       ctx.fillStyle = 'rgba(255,255,255,0.25)';
       ctx.beginPath(); ctx.arc(dx - dotR * 0.2, cy - dotR * 0.2, dotR * 0.35, 0, Math.PI * 2); ctx.fill();
-
-      // Collection glow
       if (blockerCollecting && blockerCollectT > 0.5) {
         ctx.globalAlpha = 0.4 + Math.sin(tick * 0.2 + i * 0.5) * 0.3;
         ctx.fillStyle = bc.glow;
@@ -355,15 +334,12 @@ function drawBlockerProgress() {
         ctx.globalAlpha = 1;
       }
     } else {
-      // Empty outline dot
       ctx.strokeStyle = 'rgba(122,112,104,0.22)'; ctx.lineWidth = 1 * S;
       ctx.setLineDash([2 * S, 2 * S]);
       ctx.beginPath(); ctx.arc(dx, cy, dotR * 0.65, 0, Math.PI * 2); ctx.stroke();
       ctx.setLineDash([]);
     }
   }
-
-  // "All collected!" flash during collection
   if (blockerCollecting && blockerCollectT <= 0.5 && blockerCollectT > 0) {
     var flashAlpha = blockerCollectT * 2;
     ctx.globalAlpha = flashAlpha * 0.6;
@@ -371,7 +347,6 @@ function drawBlockerProgress() {
     rRect(cx - pillW / 2, cy - pillH / 2, pillW, pillH, pillH / 2); ctx.fill();
     ctx.globalAlpha = 1;
   }
-
   ctx.restore();
 }
 

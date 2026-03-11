@@ -1,9 +1,10 @@
 // ============================================================
 // editor.js — Level Editor (reads box types from registry)
+//             + Tunnel placement, orientation, contents editing
 // ============================================================
 
 var editor = {
-  grid: [],            // 7x7: null = empty, { ci: 0-7, type: 'default'|'hidden'|... }
+  grid: [],            // 7x7: null = empty, { ci: 0-7, type: 'default'|... } or { tunnel: true, dir: 'bottom', contents: [...] }
   name: 'Custom Level',
   desc: 'My custom level',
   mrbPerBox: 9,
@@ -11,6 +12,9 @@ var editor = {
   lockButtons: 0,
   activeColor: 0,      // -1=eraser, 0-7=color
   activeType: BoxTypeOrder[0],
+  tunnelMode: false,    // true when placing tunnels
+  tunnelDir: 'bottom',  // current tunnel direction for new tunnels
+  selectedTunnel: -1,   // index of selected tunnel for content editing
   visible: false
 };
 
@@ -24,6 +28,9 @@ function editorInit() {
   editor.lockButtons = 0;
   editor.activeColor = 0;
   editor.activeType = BoxTypeOrder[0];
+  editor.tunnelMode = false;
+  editor.tunnelDir = 'bottom';
+  editor.selectedTunnel = -1;
 }
 
 function showEditor(fresh) {
@@ -49,6 +56,7 @@ function editorBuildUI() {
   editorRenderToolbar();
   editorRenderSettings();
   editorUpdateStats();
+  editorRenderTunnelPanel();
 }
 
 // ── Grid ──
@@ -59,7 +67,17 @@ function editorRenderGrid() {
     var cell = document.createElement('div');
     cell.className = 'ed-cell';
     var v = editor.grid[i];
-    if (v && v.ci >= 0) {
+    if (v && v.tunnel) {
+      // Tunnel cell
+      var isSelected = (editor.selectedTunnel === i);
+      cell.style.background = 'linear-gradient(135deg,#3D3548,#252030)';
+      cell.style.borderColor = isSelected ? '#FFD080' : '#6A6070';
+      if (isSelected) cell.style.boxShadow = '0 0 0 2px rgba(255,208,128,0.5)';
+      var arrow = TUNNEL_DIR_ARROWS[v.dir] || '\u25BC';
+      var count = v.contents ? v.contents.length : 0;
+      cell.innerHTML = '<span class="ed-cell-dot" style="color:#FFD080;font-size:13px">' + arrow +
+        '</span><span class="ed-tunnel-badge">' + count + '</span>';
+    } else if (v && v.ci >= 0) {
       var bt = getBoxType(v.type);
       var st = bt.editorCellStyle(v.ci);
       cell.style.background = st.background;
@@ -78,102 +96,343 @@ function editorRenderGrid() {
 
 function editorCellClick(e) {
   var idx = parseInt(e.currentTarget.getAttribute('data-idx'));
-  if (editor.activeColor === -1) {
-    editor.grid[idx] = null;
-  } else {
+
+  if (editor.tunnelMode) {
+    // In tunnel mode: place or select tunnel
     var existing = editor.grid[idx];
-    if (existing && existing.ci === editor.activeColor && existing.type === editor.activeType) {
+    if (existing && existing.tunnel) {
+      // Select this tunnel for editing
+      editor.selectedTunnel = idx;
+    } else if (editor.activeColor === -1) {
+      // Eraser in tunnel mode
       editor.grid[idx] = null;
+      if (editor.selectedTunnel === idx) editor.selectedTunnel = -1;
     } else {
-      editor.grid[idx] = { ci: editor.activeColor, type: editor.activeType };
+      // Place new tunnel
+      editor.grid[idx] = { tunnel: true, dir: editor.tunnelDir, contents: [] };
+      editor.selectedTunnel = idx;
+    }
+  } else {
+    // Normal box painting mode
+    if (editor.activeColor === -1) {
+      editor.grid[idx] = null;
+      if (editor.selectedTunnel === idx) editor.selectedTunnel = -1;
+    } else {
+      var existing = editor.grid[idx];
+      if (existing && !existing.tunnel && existing.ci === editor.activeColor && existing.type === editor.activeType) {
+        editor.grid[idx] = null;
+      } else {
+        editor.grid[idx] = { ci: editor.activeColor, type: editor.activeType };
+      }
+      if (editor.selectedTunnel === idx) editor.selectedTunnel = -1;
     }
   }
   editorRenderGrid();
   editorUpdateStats();
+  editorRenderTunnelPanel();
 }
 
 function editorCellErase(e) {
   e.preventDefault();
-  editor.grid[parseInt(e.currentTarget.getAttribute('data-idx'))] = null;
+  var idx = parseInt(e.currentTarget.getAttribute('data-idx'));
+  editor.grid[idx] = null;
+  if (editor.selectedTunnel === idx) editor.selectedTunnel = -1;
   editorRenderGrid();
   editorUpdateStats();
+  editorRenderTunnelPanel();
 }
 
-// ── Toolbar: type selector (from registry) + color palette ──
+// ── Toolbar: mode toggle + type selector + color/direction palette ──
 function editorRenderToolbar() {
   var el = document.getElementById('ed-toolbar');
   el.innerHTML = '';
 
-  // Type buttons — one per registered box type
+  // Mode row: Box types + Tunnel toggle
   var typeRow = document.createElement('div');
   typeRow.className = 'ed-type-row';
+
+  // Box type buttons
   for (var t = 0; t < BoxTypeOrder.length; t++) {
     var id = BoxTypeOrder[t];
     var bt = BoxTypes[id];
     var tb = document.createElement('button');
-    tb.className = 'ed-type-btn' + (editor.activeType === id ? ' active' : '');
+    tb.className = 'ed-type-btn' + (!editor.tunnelMode && editor.activeType === id ? ' active' : '');
     tb.textContent = bt.label;
     tb.setAttribute('data-type', id);
     tb.addEventListener('click', function () {
       editor.activeType = this.getAttribute('data-type');
+      editor.tunnelMode = false;
       editorRenderToolbar();
+      editorRenderTunnelPanel();
     });
     typeRow.appendChild(tb);
   }
+
+  // Tunnel mode button
+  var tunnelBtn = document.createElement('button');
+  tunnelBtn.className = 'ed-type-btn' + (editor.tunnelMode ? ' active' : '');
+  tunnelBtn.textContent = '\uD83D\uDD73 Tunnel';
+  tunnelBtn.style.borderColor = editor.tunnelMode ? 'rgba(255,190,80,0.6)' : '';
+  tunnelBtn.style.color = editor.tunnelMode ? '#E8A84C' : '';
+  tunnelBtn.addEventListener('click', function () {
+    editor.tunnelMode = true;
+    editorRenderToolbar();
+    editorRenderTunnelPanel();
+  });
+  typeRow.appendChild(tunnelBtn);
+
   el.appendChild(typeRow);
 
-  // Color palette: eraser + 8 colors
-  var colorRow = document.createElement('div');
-  colorRow.className = 'ed-color-row';
-  var eraser = document.createElement('button');
-  eraser.className = 'ed-tool' + (editor.activeColor === -1 ? ' active' : '');
-  eraser.style.background = 'rgba(180,165,145,0.5)';
-  eraser.innerHTML = '\u2716';
-  eraser.title = 'Eraser';
-  eraser.addEventListener('click', function () { editor.activeColor = -1; editorRenderToolbar(); });
-  colorRow.appendChild(eraser);
-  for (var ci = 0; ci < NUM_COLORS; ci++) {
-    var cb = document.createElement('button');
-    cb.className = 'ed-tool' + (editor.activeColor === ci ? ' active' : '');
-    cb.style.background = COLORS[ci].fill;
-    cb.innerHTML = CLR_NAMES[ci][0].toUpperCase();
-    cb.title = CLR_NAMES[ci];
-    cb.setAttribute('data-ci', ci);
-    cb.addEventListener('click', function () {
-      editor.activeColor = parseInt(this.getAttribute('data-ci'));
-      editorRenderToolbar();
-    });
-    colorRow.appendChild(cb);
+  if (editor.tunnelMode) {
+    // Direction selector row
+    var dirRow = document.createElement('div');
+    dirRow.className = 'ed-color-row';
+
+    // Eraser
+    var eraser = document.createElement('button');
+    eraser.className = 'ed-tool' + (editor.activeColor === -1 ? ' active' : '');
+    eraser.style.background = 'rgba(180,165,145,0.5)';
+    eraser.innerHTML = '\u2716';
+    eraser.title = 'Eraser';
+    eraser.addEventListener('click', function () { editor.activeColor = -1; editorRenderToolbar(); });
+    dirRow.appendChild(eraser);
+
+    var dirs = ['top', 'left', 'bottom', 'right'];
+    var dirLabels = ['\u25B2', '\u25C0', '\u25BC', '\u25B6'];
+    for (var d = 0; d < dirs.length; d++) {
+      var db = document.createElement('button');
+      db.className = 'ed-tool' + (editor.tunnelDir === dirs[d] && editor.activeColor !== -1 ? ' active' : '');
+      db.style.background = 'linear-gradient(135deg,#3D3548,#252030)';
+      db.style.color = '#FFD080';
+      db.style.fontSize = '16px';
+      db.innerHTML = dirLabels[d];
+      db.title = dirs[d];
+      db.setAttribute('data-dir', dirs[d]);
+      db.addEventListener('click', function () {
+        editor.tunnelDir = this.getAttribute('data-dir');
+        editor.activeColor = 0; // exit eraser mode
+        editorRenderToolbar();
+      });
+      dirRow.appendChild(db);
+    }
+    el.appendChild(dirRow);
+  } else {
+    // Color palette: eraser + 8 colors
+    var colorRow = document.createElement('div');
+    colorRow.className = 'ed-color-row';
+    var eraser = document.createElement('button');
+    eraser.className = 'ed-tool' + (editor.activeColor === -1 ? ' active' : '');
+    eraser.style.background = 'rgba(180,165,145,0.5)';
+    eraser.innerHTML = '\u2716';
+    eraser.title = 'Eraser';
+    eraser.addEventListener('click', function () { editor.activeColor = -1; editorRenderToolbar(); });
+    colorRow.appendChild(eraser);
+    for (var ci = 0; ci < NUM_COLORS; ci++) {
+      var cb = document.createElement('button');
+      cb.className = 'ed-tool' + (editor.activeColor === ci ? ' active' : '');
+      cb.style.background = COLORS[ci].fill;
+      cb.innerHTML = CLR_NAMES[ci][0].toUpperCase();
+      cb.title = CLR_NAMES[ci];
+      cb.setAttribute('data-ci', ci);
+      cb.addEventListener('click', function () {
+        editor.activeColor = parseInt(this.getAttribute('data-ci'));
+        editorRenderToolbar();
+      });
+      colorRow.appendChild(cb);
+    }
+    el.appendChild(colorRow);
   }
-  el.appendChild(colorRow);
+}
+
+// ── Tunnel contents editor panel ──
+function editorRenderTunnelPanel() {
+  var container = document.getElementById('ed-tunnel-panel');
+  if (!container) return;
+
+  if (editor.selectedTunnel < 0 || !editor.grid[editor.selectedTunnel] || !editor.grid[editor.selectedTunnel].tunnel) {
+    container.style.display = 'none';
+    return;
+  }
+
+  container.style.display = 'block';
+  var tunnel = editor.grid[editor.selectedTunnel];
+  var html = '';
+
+  // Direction selector
+  html += '<div class="ed-section-title"><span class="icon">\uD83D\uDD73</span> Tunnel #' + (editor.selectedTunnel + 1) + ' — Direction</div>';
+  html += '<div class="ed-tunnel-dir-row">';
+  var dirs = ['top', 'left', 'bottom', 'right'];
+  var dirLabels = ['\u25B2 Up', '\u25C0 Left', '\u25BC Down', '\u25B6 Right'];
+  for (var d = 0; d < dirs.length; d++) {
+    var active = tunnel.dir === dirs[d] ? ' active' : '';
+    html += '<button class="ed-tunnel-dir-btn' + active + '" data-dir="' + dirs[d] + '">' + dirLabels[d] + '</button>';
+  }
+  html += '</div>';
+
+  // Exit tile info
+  var row = Math.floor(editor.selectedTunnel / 7);
+  var col = editor.selectedTunnel % 7;
+  var er = row, ec = col;
+  if (tunnel.dir === 'top') er = row - 1;
+  else if (tunnel.dir === 'bottom') er = row + 1;
+  else if (tunnel.dir === 'left') ec = col - 1;
+  else if (tunnel.dir === 'right') ec = col + 1;
+  var exitValid = (er >= 0 && er < 7 && ec >= 0 && ec < 7);
+  if (!exitValid) {
+    html += '<div class="ed-stat-warn" style="margin:4px 0">Exit points outside the grid!</div>';
+  } else {
+    var exitIdx = er * 7 + ec;
+    var exitCell = editor.grid[exitIdx];
+    if (exitCell && !exitCell.tunnel) {
+      html += '<div class="ed-stat-warn" style="margin:4px 0">Exit tile is occupied by a box</div>';
+    } else if (exitCell && exitCell.tunnel) {
+      html += '<div class="ed-stat-warn" style="margin:4px 0">Exit tile is another tunnel</div>';
+    }
+  }
+
+  // Contents list
+  html += '<div class="ed-section-title" style="margin-top:8px"><span class="icon">\uD83D\uDCE6</span> Stored Boxes (' + tunnel.contents.length + ')</div>';
+  html += '<div class="ed-tunnel-contents">';
+  if (tunnel.contents.length === 0) {
+    html += '<span style="font-size:11px;color:#9C8A70;font-style:italic">Empty — add boxes below</span>';
+  } else {
+    for (var ci2 = 0; ci2 < tunnel.contents.length; ci2++) {
+      var item = tunnel.contents[ci2];
+      var c = COLORS[item.ci];
+      var typeLabel = (BoxTypes[item.type] || BoxTypes[BoxTypeOrder[0]]).label;
+      html += '<span class="ed-tunnel-item" data-cidx="' + ci2 + '" title="' + CLR_NAMES[item.ci] + ' ' + typeLabel + ' — click to remove" style="background:' + c.fill + '">';
+      html += '<span style="font-size:8px;opacity:0.7">' + typeLabel[0] + '</span>';
+      html += '</span>';
+    }
+  }
+  html += '</div>';
+
+  // Add box controls
+  html += '<div class="ed-section-title" style="margin-top:8px"><span class="icon">&#10133;</span> Add Box to Tunnel</div>';
+  html += '<div class="ed-tunnel-add-row">';
+  // Type selector for adding
+  html += '<select id="ed-tunnel-add-type" class="ed-tunnel-select">';
+  for (var t = 0; t < BoxTypeOrder.length; t++) {
+    html += '<option value="' + BoxTypeOrder[t] + '">' + BoxTypes[BoxTypeOrder[t]].label + '</option>';
+  }
+  html += '</select>';
+  html += '</div>';
+  // Color buttons for adding
+  html += '<div class="ed-tunnel-add-colors">';
+  for (var ci3 = 0; ci3 < NUM_COLORS; ci3++) {
+    html += '<button class="ed-tunnel-add-clr" data-ci="' + ci3 + '" style="background:' + COLORS[ci3].fill + '" title="Add ' + CLR_NAMES[ci3] + '">' + CLR_NAMES[ci3][0].toUpperCase() + '</button>';
+  }
+  html += '</div>';
+
+  // Clear all button
+  if (tunnel.contents.length > 0) {
+    html += '<div style="text-align:center;margin-top:6px"><button class="ed-qbtn" id="ed-tunnel-clear">Clear All</button></div>';
+  }
+
+  container.innerHTML = html;
+
+  // Bind events
+  var dirBtns = container.querySelectorAll('.ed-tunnel-dir-btn');
+  for (var d2 = 0; d2 < dirBtns.length; d2++) {
+    dirBtns[d2].addEventListener('click', function () {
+      if (editor.selectedTunnel >= 0 && editor.grid[editor.selectedTunnel]) {
+        editor.grid[editor.selectedTunnel].dir = this.getAttribute('data-dir');
+        editorRenderGrid();
+        editorRenderTunnelPanel();
+        editorUpdateStats();
+      }
+    });
+  }
+
+  var items = container.querySelectorAll('.ed-tunnel-item');
+  for (var it = 0; it < items.length; it++) {
+    items[it].addEventListener('click', function () {
+      var cidx = parseInt(this.getAttribute('data-cidx'));
+      if (editor.selectedTunnel >= 0 && editor.grid[editor.selectedTunnel]) {
+        editor.grid[editor.selectedTunnel].contents.splice(cidx, 1);
+        editorRenderGrid();
+        editorRenderTunnelPanel();
+        editorUpdateStats();
+      }
+    });
+  }
+
+  var addClrs = container.querySelectorAll('.ed-tunnel-add-clr');
+  for (var ac = 0; ac < addClrs.length; ac++) {
+    addClrs[ac].addEventListener('click', function () {
+      var ci4 = parseInt(this.getAttribute('data-ci'));
+      var typeEl = document.getElementById('ed-tunnel-add-type');
+      var type = typeEl ? typeEl.value : 'default';
+      if (editor.selectedTunnel >= 0 && editor.grid[editor.selectedTunnel]) {
+        editor.grid[editor.selectedTunnel].contents.push({ ci: ci4, type: type });
+        editorRenderGrid();
+        editorRenderTunnelPanel();
+        editorUpdateStats();
+      }
+    });
+  }
+
+  var clearBtn = document.getElementById('ed-tunnel-clear');
+  if (clearBtn) {
+    clearBtn.addEventListener('click', function () {
+      if (editor.selectedTunnel >= 0 && editor.grid[editor.selectedTunnel]) {
+        editor.grid[editor.selectedTunnel].contents = [];
+        editorRenderGrid();
+        editorRenderTunnelPanel();
+        editorUpdateStats();
+      }
+    });
+  }
 }
 
 // ── Quick actions ──
 function editorFillRandom() {
   for (var i = 0; i < 49; i++) editor.grid[i] = null;
+  editor.selectedTunnel = -1;
   var cl = [];
   for (var c = 0; c < 4; c++) for (var n = 0; n < 6; n++) cl.push(c);
   shuffle(cl);
   var indices = []; for (var i = 0; i < 49; i++) indices.push(i);
   shuffle(indices);
   for (var i = 0; i < cl.length; i++) editor.grid[indices[i]] = { ci: cl[i], type: 'default' };
-  editorRenderGrid(); editorUpdateStats();
+  editorRenderGrid(); editorUpdateStats(); editorRenderTunnelPanel();
 }
 
 function editorClearAll() {
   for (var i = 0; i < 49; i++) editor.grid[i] = null;
-  editorRenderGrid(); editorUpdateStats();
+  editor.selectedTunnel = -1;
+  editorRenderGrid(); editorUpdateStats(); editorRenderTunnelPanel();
 }
 
 // ── Stats ──
 function editorUpdateStats() {
   var counts = [];
-  var regularMrb = []; // actual regular marbles per color (accounting for blockers)
+  var regularMrb = [];
   for (var c = 0; c < NUM_COLORS; c++) { counts.push(0); regularMrb.push(0); }
   var total = 0, typeCounts = {}, totalBlockers = 0;
+  var tunnelCount = 0, tunnelBoxCount = 0;
   for (var i = 0; i < 49; i++) {
     var v = editor.grid[i];
-    if (v && v.ci >= 0) {
+    if (!v) continue;
+    if (v.tunnel) {
+      tunnelCount++;
+      // Count marbles from tunnel contents
+      if (v.contents) {
+        tunnelBoxCount += v.contents.length;
+        for (var tc = 0; tc < v.contents.length; tc++) {
+          var tItem = v.contents[tc];
+          counts[tItem.ci]++;
+          if (tItem.type === 'blocker') {
+            regularMrb[tItem.ci] += Math.max(0, editor.mrbPerBox - BLOCKER_PER_BOX);
+            totalBlockers += BLOCKER_PER_BOX;
+          } else {
+            regularMrb[tItem.ci] += editor.mrbPerBox;
+          }
+        }
+      }
+      continue;
+    }
+    if (v.ci >= 0) {
       counts[v.ci]++;
       total++;
       typeCounts[v.type] = (typeCounts[v.type] || 0) + 1;
@@ -187,14 +446,15 @@ function editorUpdateStats() {
   }
   var el = document.getElementById('ed-stats');
   var html = '<span class="ed-stat-total">' + total + ' boxes</span>';
-  // Show type breakdown
   for (var t = 0; t < BoxTypeOrder.length; t++) {
     var tid = BoxTypeOrder[t];
     if (typeCounts[tid]) {
       html += '<span class="ed-stat-chip" style="background:' + BoxTypes[tid].editorColor + '">' + typeCounts[tid] + ' ' + BoxTypes[tid].label.toLowerCase() + '</span>';
     }
   }
-  // Show blocker marble count if any
+  if (tunnelCount > 0) {
+    html += '<span class="ed-stat-chip" style="background:#3D3548;border:1px solid #6A6070">' + tunnelCount + ' tunnel' + (tunnelCount > 1 ? 's' : '') + ' (' + tunnelBoxCount + ' stored)</span>';
+  }
   if (totalBlockers > 0) {
     html += '<span class="ed-stat-chip" style="background:' + COLORS[BLOCKER_CI].fill + '">' + totalBlockers + ' blocker mrb</span>';
   }
@@ -202,10 +462,10 @@ function editorUpdateStats() {
     if (counts[c] > 0) html += '<span class="ed-stat-chip" style="background:' + COLORS[c].fill + '">' + counts[c] + '</span>';
   }
   var warn = '';
-  if (total === 0) {
+  var totalAll = total + tunnelBoxCount;
+  if (totalAll === 0) {
     warn = 'Place some boxes to create a level';
   } else {
-    // Validate regular marble divisibility by sort cap
     for (var c = 0; c < NUM_COLORS; c++) {
       if (regularMrb[c] > 0) {
         if (regularMrb[c] % editor.sortCap !== 0) {
@@ -214,7 +474,6 @@ function editorUpdateStats() {
         }
       }
     }
-    // Validate blocker marble count is a multiple of 3
     if (!warn && totalBlockers > 0 && totalBlockers % 3 !== 0) {
       warn = 'Total blocker marbles (' + totalBlockers + ') must be a multiple of 3';
     }
@@ -310,6 +569,7 @@ function editorImportJSON() {
           var cell = lvl.grid[i];
           if (cell === null || cell === undefined || cell === -1) editor.grid[i] = null;
           else if (typeof cell === 'number') editor.grid[i] = cell >= 0 ? { ci: cell, type: 'default' } : null;
+          else if (cell.tunnel) editor.grid[i] = { tunnel: true, dir: cell.dir || 'bottom', contents: cell.contents || [] };
           else editor.grid[i] = cell;
         }
       }
@@ -322,6 +582,7 @@ function editorImportJSON() {
       var descEl = document.getElementById('ed-desc');
       if (nameEl) nameEl.value = editor.name;
       if (descEl) descEl.value = editor.desc;
+      editor.selectedTunnel = -1;
       ta.style.display = 'none';
       editorBuildUI();
       editorShowToast('Imported!');
