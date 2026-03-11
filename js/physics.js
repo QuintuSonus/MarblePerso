@@ -114,7 +114,15 @@ function spawnPhysMarbles(box) {
         var my = b.y + L.bh / 2 + (si.r - 1) * mgY - 2 * S;
         var vx = (Math.random() - 0.5) * 2 * S;
         var vy = -(2 + Math.random() * 2) * S;
-        var marbleCi = (blockerCount > 0 && spawnIdx >= bStart) ? BLOCKER_CI : b.ci;
+        // MODIFIED: Handle pack colors
+        var marbleCi;
+        if (b.boxType === 'pack' && b.packColors) {
+          marbleCi = getPackMarbleColor(b.packColors, spawnIdx);
+        } else if (blockerCount > 0 && spawnIdx >= bStart) {
+          marbleCi = BLOCKER_CI;
+        } else {
+          marbleCi = b.ci;
+        }
         physMarbles.push({ x: mx, y: my, vx: vx, vy: vy, ci: marbleCi, r: MR, spawnT: 1.0 });
         sfx.drop();
         spawnBurst(mx, my, COLORS[marbleCi].fill, 4);

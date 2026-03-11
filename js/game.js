@@ -2,6 +2,7 @@
 // game.js — Game init, update loop, input, level select
 //           + Tunnel spawning integration
 //           + Wall cell support
+//           + Pack box support
 // ============================================================
 
 // === LEVEL SELECT ===
@@ -17,11 +18,12 @@ function buildLevelGrid() {
     btn.style.boxShadow = '0 5px 18px ' + clr.shadow;
     if (i < unlockedLevels) {
       var stars = '', s = levelStars[i];
-      for (var j = 0; j < 3; j++) stars += (j < s ? '\u2605' : '\u2606');
+      for (var j = 0; j < 3; j++) stars += (j < s ? '\u2B50' : '\u2606');
       btn.innerHTML = '<span class="lb-num">' + (i + 1) + '</span><span class="lb-stars">' + stars + '</span>';
-      (function (idx) { btn.addEventListener('click', function () { startLevel(idx); }); })(i);
+      btn.setAttribute('data-idx', i);
+      btn.addEventListener('click', function () { startLevel(parseInt(this.getAttribute('data-idx'))); });
     } else {
-      btn.innerHTML = '<span class="lb-lock">\uD83D\uDD12</span><span class="lb-num" style="font-size:16px;opacity:0.6">' + (i + 1) + '</span>';
+      btn.innerHTML = '<span class="lb-lock">\uD83D\uDD12</span>';
     }
     grid.appendChild(btn);
   }
@@ -29,94 +31,101 @@ function buildLevelGrid() {
 
 function showLevelSelect() {
   gameActive = false;
+  editorCleanupTest();
   document.getElementById('win-screen').classList.remove('show');
-  document.getElementById('cal-toggle').style.display = 'none';
-  if (typeof editor !== 'undefined' && editor._testIdx !== undefined) {
-    editorCleanupTest();
-    showEditor(false);
-    return;
-  }
   document.getElementById('level-screen').classList.remove('hidden');
-  if (typeof editorCleanupTest === 'function') editorCleanupTest();
+  document.getElementById('cal-toggle').style.display = 'none';
+  hideEditor();
   buildLevelGrid();
 }
 
-function startLevel(idx) {
-  currentLevel = idx;
-  gameActive = true;
-  document.getElementById('level-screen').classList.add('hidden');
-  document.getElementById('cal-toggle').style.display = '';
-  ensureAudio();
-  initGame();
-}
-
 function goNextLevel() {
+  document.getElementById('win-screen').classList.remove('show');
   if (currentLevel + 1 < LEVELS.length) startLevel(currentLevel + 1);
   else showLevelSelect();
 }
 
-// === GAME INIT ===
-function initGame() {
-  won = false; score = 0; particles = []; physMarbles = []; jumpers = []; tick = 0; hoverIdx = -1;
-  totalBlockerMarbles = 0; blockersOnBelt = 0; blockerCollecting = false; blockerCollectT = 0;
-  blockerCollectSlots = []; blockerCollectCleared = false;
-  document.getElementById('win-screen').classList.remove('show');
-  computeLayout(); initBeltSlots();
+// === START LEVEL ===
+function startLevel(idx) {
+  editorCleanupTest();
+  currentLevel = idx;
+  var lvl = LEVELS[idx];
+  document.getElementById('level-screen').classList.add('hidden');
+  document.getElementById('cal-toggle').style.display = 'block';
+  MRB_PER_BOX = lvl.mrbPerBox || 9;
+  SORT_CAP = lvl.sortCap || 3;
+  won = false; tick = 0; physMarbles = []; jumpers = []; particles = []; hoverIdx = -1;
+  totalBlockerMarbles = 0;
+  blockersOnBelt = 0;
+  blockerCollecting = false;
+  blockerCollectT = 0;
+  blockerCollectSlots = [];
+  blockerCollectCleared = false;
+  resize();
+  initBeltSlots();
+  gameActive = true;
 
-  var totalSlots = L.rows * L.cols;
-  var lvl = LEVELS[currentLevel];
-
-  // ── Build boxSlots, tunnelSlots, wallSlots from grid or legacy random ──
-  var boxSlots = {};
-  var tunnelSlots = {};
-  var wallSlots = {};
+  // ── Parse grid ──
+  var boxSlots = [], tunnelSlots = [], wallSlots = [];
   if (lvl.grid) {
-    for (var i = 0; i < Math.min(lvl.grid.length, totalSlots); i++) {
-      var cell = lvl.grid[i];
-      if (cell === null || cell === undefined) continue;
-      if (cell.wall) {
-        wallSlots[i] = true;
-        continue;
-      }
-      if (cell.tunnel) {
-        tunnelSlots[i] = { dir: cell.dir || 'bottom', contents: cell.contents ? cell.contents.slice() : [] };
-      } else if (typeof cell === 'number') {
-        if (cell >= 0) boxSlots[i] = { ci: cell, boxType: 'default' };
-      } else if (typeof cell === 'object' && cell.ci >= 0) {
-        boxSlots[i] = { ci: cell.ci, boxType: cell.type || 'default' };
-      }
+    for (var g = 0; g < lvl.grid.length; g++) {
+      var cell = lvl.grid[g];
+      if (!cell) { boxSlots.push(null); tunnelSlots.push(null); wallSlots.push(null); }
+      else if (cell.wall) { boxSlots.push(null); tunnelSlots.push(null); wallSlots.push({ wall: true }); }
+      else if (cell.tunnel) { boxSlots.push(null); tunnelSlots.push({ dir: cell.dir || 'bottom', contents: cell.contents || [] }); wallSlots.push(null); }
+      else if (typeof cell === 'number') { boxSlots.push(cell >= 0 ? { ci: cell, boxType: 'default' } : null); tunnelSlots.push(null); wallSlots.push(null); }
+      else { boxSlots.push({ ci: cell.ci, boxType: cell.type || 'default', packColors: cell.packColors || null }); tunnelSlots.push(null); wallSlots.push(null); }
     }
-    if (lvl.mrbPerBox) MRB_PER_BOX = lvl.mrbPerBox;
-    if (lvl.sortCap) SORT_CAP = lvl.sortCap;
   } else {
-    var totalBoxes = 4 * STOCK_PER_CLR;
-    var cl = [];
-    for (var c = 0; c < 4; c++) for (var n = 0; n < STOCK_PER_CLR; n++) cl.push(c);
-    shuffle(cl);
-    var slotIndices = [];
-    for (var i = 0; i < totalSlots; i++) slotIndices.push(i);
-    shuffle(slotIndices);
-    for (var i = 0; i < totalBoxes; i++) boxSlots[slotIndices[i]] = { ci: cl[i], boxType: 'default' };
+    var colorCounts = [0, 0, 0, 0, 0, 0, 0, 0];
+    var slots = [];
+    for (var c = 0; c < 4; c++) for (var n = 0; n < 6; n++) slots.push(c);
+    shuffle(slots);
+    for (var g = 0; g < 49; g++) {
+      boxSlots.push(slots[g] !== undefined ? { ci: slots[g], boxType: 'default' } : null);
+      tunnelSlots.push(null);
+      wallSlots.push(null);
+    }
   }
 
-  // ── Count regular marbles per color for sort columns ──
+  // ── Count marbles per color ──
   var colorMarblesTotal = [];
   for (var c = 0; c < NUM_COLORS; c++) colorMarblesTotal.push(0);
-  for (var k in boxSlots) {
-    var bs = boxSlots[k];
-    var isBlockerBox = (bs.boxType === 'blocker');
-    var regularPerBox = isBlockerBox ? (MRB_PER_BOX - BLOCKER_PER_BOX) : MRB_PER_BOX;
-    colorMarblesTotal[bs.ci] += regularPerBox;
+
+  for (var g = 0; g < boxSlots.length; g++) {
+    var slot = boxSlots[g];
+    if (!slot) continue;
+    // MODIFIED: Handle pack boxes
+    var isBlockerBox = (slot.boxType === 'blocker');
+    var isPackBox = (slot.boxType === 'pack');
+    if (isPackBox && slot.packColors) {
+      for (var pc = 0; pc < slot.packColors.length; pc++) {
+        colorMarblesTotal[slot.packColors[pc]] += PACK_MARBLES_PER_COLOR;
+      }
+    } else {
+      var regularPerBox = isBlockerBox ? (MRB_PER_BOX - BLOCKER_PER_BOX) : MRB_PER_BOX;
+      colorMarblesTotal[slot.ci] += regularPerBox;
+    }
     if (isBlockerBox) totalBlockerMarbles += BLOCKER_PER_BOX;
   }
-  // Count marbles from tunnel contents
-  for (var k in tunnelSlots) {
-    var ts = tunnelSlots[k];
-    for (var tc = 0; tc < ts.contents.length; tc++) {
-      var tItem = ts.contents[tc];
+
+  // Count tunnel contents
+  for (var g = 0; g < tunnelSlots.length; g++) {
+    var tSlot = tunnelSlots[g];
+    if (!tSlot || !tSlot.contents) continue;
+    for (var tc = 0; tc < tSlot.contents.length; tc++) {
+      var tItem = tSlot.contents[tc];
+      // MODIFIED: Handle pack boxes in tunnels
       var isBlockerBox = (tItem.type === 'blocker');
-      var regularPerBox = isBlockerBox ? (MRB_PER_BOX - BLOCKER_PER_BOX) : MRB_PER_BOX;
-      colorMarblesTotal[tItem.ci] += regularPerBox;
+      var isPackBox = (tItem.type === 'pack');
+      if (isPackBox && tItem.packColors) {
+        for (var pc = 0; pc < tItem.packColors.length; pc++) {
+          colorMarblesTotal[tItem.packColors[pc]] += PACK_MARBLES_PER_COLOR;
+        }
+      } else {
+        var regularPerBox = isBlockerBox ? (MRB_PER_BOX - BLOCKER_PER_BOX) : MRB_PER_BOX;
+        colorMarblesTotal[tItem.ci] += regularPerBox;
+      }
       if (isBlockerBox) totalBlockerMarbles += BLOCKER_PER_BOX;
     }
   }
@@ -138,13 +147,14 @@ function initGame() {
       stock.push({
         isTunnel: true, isWall: false,
         tunnelDir: tSlot.dir,
-        tunnelContents: tSlot.contents.map(function (item) { return { ci: item.ci, type: item.type || 'default' }; }),
+        tunnelContents: tSlot.contents.map(function (item) { return { ci: item.ci, type: item.type || 'default', packColors: item.packColors || null }; }),
         tunnelTotal: tSlot.contents.length,
         tunnelSpawning: false,
         tunnelCooldown: 60,
         ci: 0, used: false, remaining: 0, spawning: false, spawnIdx: 0,
         revealed: true, empty: false, boxType: 'default',
         iceHP: 0, iceCrackT: 0, iceShatterT: 0, blockerCount: 0,
+        packColors: null,
         x: L.sx + c * (L.bw + L.bg), y: L.sy + r * (L.bh + L.bg),
         shakeT: 0, hoverT: 0, popT: 0, revealT: 0, emptyT: 0, idlePhase: 0
       });
@@ -155,6 +165,7 @@ function initGame() {
         ci: 0, used: false, remaining: 0, spawning: false, spawnIdx: 0,
         revealed: false, empty: false, boxType: 'default',
         iceHP: 0, iceCrackT: 0, iceShatterT: 0, blockerCount: 0,
+        packColors: null,
         x: L.sx + c * (L.bw + L.bg), y: L.sy + r * (L.bh + L.bg),
         shakeT: 0, hoverT: 0, popT: 0, revealT: 0, emptyT: 0, idlePhase: 0
       });
@@ -162,17 +173,21 @@ function initGame() {
       stock.push({ ci: 0, used: false, remaining: 0, spawning: false, spawnIdx: 0,
         revealed: true, empty: true, boxType: 'default', isTunnel: false, isWall: false,
         iceHP: 0, iceCrackT: 0, iceShatterT: 0, blockerCount: 0,
+        packColors: null,
         x: L.sx + c * (L.bw + L.bg), y: L.sy + r * (L.bh + L.bg),
         shakeT: 0, hoverT: 0, popT: 0, revealT: 0, emptyT: 0, idlePhase: 0 });
     } else {
       var isIce = (slot.boxType === 'ice');
       var isBlocker = (slot.boxType === 'blocker');
+      var isPack = (slot.boxType === 'pack');
+      // MODIFIED: Include packColors in stock item
       stock.push({ ci: slot.ci, used: false, remaining: MRB_PER_BOX, spawning: false, spawnIdx: 0,
         revealed: isIce ? true : false, empty: false,
         boxType: slot.boxType || 'default', isTunnel: false, isWall: false,
         iceHP: isIce ? 2 : 0,
         iceCrackT: 0, iceShatterT: 0,
         blockerCount: isBlocker ? BLOCKER_PER_BOX : 0,
+        packColors: isPack ? (slot.packColors || [slot.ci, slot.ci, slot.ci]) : null,
         x: L.sx + c * (L.bw + L.bg), y: L.sy + r * (L.bh + L.bg),
         shakeT: 0, hoverT: 0, popT: 0, revealT: 0, emptyT: 0,
         idlePhase: Math.random() * Math.PI * 2 });
@@ -226,14 +241,10 @@ function initGame() {
 }
 
 // === EMPTY-CELL REVEAL ===
-// A cell is "truly empty" when:
-//  • it's an empty slot or a used-up box, AND no tunnel will spawn onto it
-//  • OR it's a depleted tunnel (0 contents left, exit tile also free)
-//  • Walls are NEVER truly empty
 function isCellTrulyEmpty(idx) {
   var s = stock[idx];
   if (!s) return false;
-  if (s.isWall) return false;  // Walls are never empty
+  if (s.isWall) return false;
   if (s.isTunnel) {
     if (s.tunnelContents && s.tunnelContents.length > 0) return false;
     var exitIdx = getTunnelExitIdx(idx);
@@ -272,18 +283,13 @@ function revealAroundEmptyCell(idx) {
     nb.revealed = true;
     nb.revealT = 1.0;
     var bx = nb.x + L.bw / 2, by = nb.y + L.bh / 2;
-    var burstColor = (nb.boxType === 'hidden') ? '#FFD700' : COLORS[nb.ci].fill;
-    for (var p = 0; p < 12; p++) {
-      var a = Math.PI * 2 * p / 12 + Math.random() * 0.3, sp = 3 + Math.random() * 4;
-      particles.push({ x: bx, y: by, vx: Math.cos(a) * sp * S, vy: Math.sin(a) * sp * S,
-        r: (2 + Math.random() * 4) * S, color: burstColor, life: 1, decay: 0.02 + Math.random() * 0.015, grav: false });
-    }
+    var burstColor = (nb.boxType === 'hidden') ? '#C89CF2' : COLORS[nb.ci].fill;
+    spawnBurst(bx, by, burstColor, 12);
     sfx.pop();
   }
-  _revealVisited[idx] = false;
+  delete _revealVisited[idx];
 }
 
-// === ICE DAMAGE ===
 function damageAdjacentIce(idx) {
   var row = Math.floor(idx / L.cols), col = idx % L.cols;
   var neighbors = [];
@@ -292,40 +298,28 @@ function damageAdjacentIce(idx) {
   if (col > 0)          neighbors.push(row * L.cols + (col - 1));
   if (col < L.cols - 1) neighbors.push(row * L.cols + (col + 1));
   for (var ni = 0; ni < neighbors.length; ni++) {
-    var nb = stock[neighbors[ni]];
-    if (nb.isTunnel || nb.isWall) continue;  // tunnels and walls don't have ice
-    if (nb.empty || nb.used || nb.iceHP <= 0) continue;
-
-    nb.iceHP--;
-    var bx = nb.x + L.bw / 2, by = nb.y + L.bh / 2;
-
-    if (nb.iceHP === 1) {
-      nb.iceCrackT = 1.0;
-      nb.shakeT = 0.4;
-      sfx.pop();
-      for (var p = 0; p < 10; p++) {
-        var a = Math.PI * 2 * p / 10 + Math.random() * 0.4, sp = 2 + Math.random() * 3;
-        particles.push({ x: bx, y: by, vx: Math.cos(a) * sp * S, vy: Math.sin(a) * sp * S,
-          r: (1.5 + Math.random() * 3) * S, color: 'rgba(180,225,255,0.8)',
-          life: 0.8, decay: 0.03 + Math.random() * 0.02, grav: false });
-      }
-    } else if (nb.iceHP === 0) {
-      nb.iceShatterT = 1.0;
-      nb.popT = 0.8;
-      nb.boxType = 'default';
-      sfx.complete();
-      for (var p = 0; p < 20; p++) {
-        var a = Math.PI * 2 * p / 20 + Math.random() * 0.3, sp = 3 + Math.random() * 5;
-        particles.push({ x: bx, y: by, vx: Math.cos(a) * sp * S, vy: Math.sin(a) * sp * S - 2 * S,
-          r: (2 + Math.random() * 4) * S,
-          color: Math.random() > 0.5 ? 'rgba(180,225,255,0.9)' : 'rgba(220,240,255,0.9)',
-          life: 1, decay: 0.015 + Math.random() * 0.015, grav: true });
-      }
-      for (var p = 0; p < 8; p++) {
-        var a = Math.random() * Math.PI * 2, sp = 1 + Math.random() * 2;
-        particles.push({ x: bx, y: by, vx: Math.cos(a) * sp * S, vy: Math.sin(a) * sp * S,
-          r: (3 + Math.random() * 3) * S, color: 'rgba(255,255,255,0.7)',
-          life: 0.6, decay: 0.04, grav: false });
+    var nIdx = neighbors[ni];
+    var nb = stock[nIdx];
+    if (nb.isTunnel || nb.isWall || nb.empty || nb.used) continue;
+    if (nb.iceHP > 0) {
+      nb.iceHP--;
+      nb.iceCrackT = 1;
+      var bx = nb.x + L.bw / 2, by = nb.y + L.bh / 2;
+      if (nb.iceHP <= 0) {
+        nb.iceShatterT = 1;
+        for (var p = 0; p < 12; p++) {
+          var a = Math.random() * Math.PI * 2, sp = 2 + Math.random() * 3;
+          particles.push({ x: bx, y: by, vx: Math.cos(a) * sp * S, vy: Math.sin(a) * sp * S - 2 * S,
+            r: (3 + Math.random() * 4) * S,
+            color: Math.random() > 0.5 ? 'rgba(180,225,255,0.9)' : 'rgba(220,240,255,0.9)',
+            life: 1, decay: 0.015 + Math.random() * 0.015, grav: true });
+        }
+        for (var p = 0; p < 8; p++) {
+          var a = Math.random() * Math.PI * 2, sp = 1 + Math.random() * 2;
+          particles.push({ x: bx, y: by, vx: Math.cos(a) * sp * S, vy: Math.sin(a) * sp * S,
+            r: (3 + Math.random() * 3) * S, color: 'rgba(255,255,255,0.7)',
+            life: 0.6, decay: 0.04, grav: false });
+        }
       }
     }
   }
@@ -334,7 +328,7 @@ function damageAdjacentIce(idx) {
 function isBoxTappable(idx) {
   var b = stock[idx];
   if (b.isTunnel) return false;
-  if (b.isWall) return false;      // walls are not tappable
+  if (b.isWall) return false;
   if (b.empty || b.used) return false;
   if (b.spawning || b.revealT > 0) return false;
   if (b.iceHP > 0) return false;
@@ -350,13 +344,15 @@ function handleTap(px, py) {
   if (px >= L.bkX && px <= L.bkX + L.bkSize && py >= L.bkY && py <= L.bkY + L.bkSize) { showLevelSelect(); return; }
   for (var i = 0; i < stock.length; i++) {
     var b = stock[i];
-    if (b.isTunnel || b.isWall) continue;  // skip tunnels and walls in tap handler
+    if (b.isTunnel || b.isWall) continue;
     if (b.empty || b.used || b.spawning || b.revealT > 0) continue;
     if (px >= b.x && px <= b.x + L.bw && py >= b.y && py <= b.y + L.bh) {
       if (!isBoxTappable(i)) { b.shakeT = 0.5; return; }
       b.popT = 1;
       sfx.pop();
-      spawnBurst(b.x + L.bw / 2, b.y + L.bh / 2, COLORS[b.ci].fill, 18);
+      // MODIFIED: Use pack first color for burst
+      var burstCi = (b.boxType === 'pack' && b.packColors) ? b.packColors[0] : b.ci;
+      spawnBurst(b.x + L.bw / 2, b.y + L.bh / 2, COLORS[burstCi].fill, 18);
       spawnPhysMarbles(b);
       damageAdjacentIce(i);
       return;
@@ -487,7 +483,7 @@ function update() {
   // Stock animations
   for (var i = 0; i < stock.length; i++) {
     var b = stock[i];
-    if (b.isTunnel || b.isWall) continue;  // tunnels and walls don't need stock animations
+    if (b.isTunnel || b.isWall) continue;
     if (b.empty) continue;
     if (b.shakeT > 0) b.shakeT = Math.max(0, b.shakeT - 0.04);
     if (b.popT > 0) b.popT = Math.max(0, b.popT - 0.025);

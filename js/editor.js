@@ -2,6 +2,7 @@
 // editor.js — Level Editor (reads box types from registry)
 //             + Tunnel placement, orientation, contents editing
 //             + Wall placement
+//             + Pack placement and color editing
 // ============================================================
 
 var editor = {
@@ -17,6 +18,7 @@ var editor = {
   tunnelDir: 'bottom',  // current tunnel direction for new tunnels
   selectedTunnel: -1,   // index of selected tunnel for content editing
   wallMode: false,      // true when placing walls
+  selectedPack: -1,     // NEW: index of selected pack for color editing
   visible: false
 };
 
@@ -34,6 +36,7 @@ function editorInit() {
   editor.tunnelDir = 'bottom';
   editor.selectedTunnel = -1;
   editor.wallMode = false;
+  editor.selectedPack = -1;
 }
 
 function showEditor(fresh) {
@@ -60,6 +63,7 @@ function editorBuildUI() {
   editorRenderSettings();
   editorUpdateStats();
   editorRenderTunnelPanel();
+  editorRenderPackPanel();
 }
 
 // ── Grid ──
@@ -86,11 +90,16 @@ function editorRenderGrid() {
       cell.innerHTML = '<span class="ed-cell-dot" style="color:#FFD080;font-size:13px">' + arrow +
         '</span><span class="ed-tunnel-badge">' + count + '</span>';
     } else if (v && v.ci >= 0) {
+      // MODIFIED: pass gridItem for pack support
       var bt = getBoxType(v.type);
-      var st = bt.editorCellStyle(v.ci);
+      var st = bt.editorCellStyle(v.ci, v);
       cell.style.background = st.background;
       cell.style.borderColor = st.borderColor;
-      cell.innerHTML = bt.editorCellHTML(v.ci);
+      cell.innerHTML = bt.editorCellHTML(v.ci, v);
+      // Highlight selected pack
+      if (v.type === 'pack' && editor.selectedPack === i) {
+        cell.style.boxShadow = '0 0 0 2px rgba(212,168,76,0.7)';
+      }
     } else {
       cell.style.background = 'rgba(180,165,145,0.25)';
       cell.style.borderColor = 'rgba(160,140,120,0.3)';
@@ -109,16 +118,16 @@ function editorCellClick(e) {
     // Wall placement mode
     var existing = editor.grid[idx];
     if (existing && existing.wall) {
-      // Toggle off: clicking existing wall removes it
       editor.grid[idx] = null;
     } else {
-      // Place wall
       editor.grid[idx] = { wall: true };
     }
     if (editor.selectedTunnel === idx) editor.selectedTunnel = -1;
+    editor.selectedPack = -1;
     editorRenderGrid();
     editorUpdateStats();
     editorRenderTunnelPanel();
+    editorRenderPackPanel();
     return;
   }
 
@@ -134,17 +143,45 @@ function editorCellClick(e) {
       editor.grid[idx] = { tunnel: true, dir: editor.tunnelDir, contents: [] };
       editor.selectedTunnel = idx;
     }
+    editor.selectedPack = -1;
   } else {
     // Normal box painting mode
     if (editor.activeColor === -1) {
       editor.grid[idx] = null;
       if (editor.selectedTunnel === idx) editor.selectedTunnel = -1;
+      editor.selectedPack = -1;
     } else {
       var existing = editor.grid[idx];
-      if (existing && !existing.tunnel && !existing.wall && existing.ci === editor.activeColor && existing.type === editor.activeType) {
+      // MODIFIED: toggle-off check handles pack type
+      if (existing && !existing.tunnel && !existing.wall && existing.type === editor.activeType && (existing.type === 'pack' || existing.ci === editor.activeColor)) {
+        // If clicking an existing pack, select it for editing instead of removing
+        if (existing.type === 'pack') {
+          editor.selectedPack = idx;
+          editorRenderGrid();
+          editorRenderPackPanel();
+          editorUpdateStats();
+          editorRenderTunnelPanel();
+          return;
+        }
         editor.grid[idx] = null;
+        editor.selectedPack = -1;
       } else {
-        editor.grid[idx] = { ci: editor.activeColor, type: editor.activeType };
+        // MODIFIED: Handle pack placement with random colors
+        if (editor.activeType === 'pack') {
+          var pc = pickPackColors();
+          // Ensure the active color is included as the first pack color
+          if (pc.indexOf(editor.activeColor) >= 0) {
+            pc.splice(pc.indexOf(editor.activeColor), 1);
+            pc.unshift(editor.activeColor);
+          } else {
+            pc[0] = editor.activeColor;
+          }
+          editor.grid[idx] = { ci: pc[0], type: 'pack', packColors: pc };
+          editor.selectedPack = idx;
+        } else {
+          editor.grid[idx] = { ci: editor.activeColor, type: editor.activeType };
+          editor.selectedPack = -1;
+        }
       }
       if (editor.selectedTunnel === idx) editor.selectedTunnel = -1;
     }
@@ -152,6 +189,7 @@ function editorCellClick(e) {
   editorRenderGrid();
   editorUpdateStats();
   editorRenderTunnelPanel();
+  editorRenderPackPanel();
 }
 
 function editorCellErase(e) {
@@ -159,9 +197,11 @@ function editorCellErase(e) {
   var idx = parseInt(e.currentTarget.getAttribute('data-idx'));
   editor.grid[idx] = null;
   if (editor.selectedTunnel === idx) editor.selectedTunnel = -1;
+  if (editor.selectedPack === idx) editor.selectedPack = -1;
   editorRenderGrid();
   editorUpdateStats();
   editorRenderTunnelPanel();
+  editorRenderPackPanel();
 }
 
 // ── Toolbar: mode toggle + type selector + color/direction palette ──
@@ -187,6 +227,7 @@ function editorRenderToolbar() {
       editor.wallMode = false;
       editorRenderToolbar();
       editorRenderTunnelPanel();
+      editorRenderPackPanel();
     });
     typeRow.appendChild(tb);
   }
@@ -202,6 +243,7 @@ function editorRenderToolbar() {
     editor.tunnelMode = false;
     editorRenderToolbar();
     editorRenderTunnelPanel();
+    editorRenderPackPanel();
   });
   typeRow.appendChild(wallBtn);
 
@@ -216,6 +258,7 @@ function editorRenderToolbar() {
     editor.wallMode = false;
     editorRenderToolbar();
     editorRenderTunnelPanel();
+    editorRenderPackPanel();
   });
   typeRow.appendChild(tunnelBtn);
 
@@ -236,14 +279,12 @@ function editorRenderToolbar() {
     dirRow.appendChild(eraser);
 
     var dirs = ['top', 'left', 'bottom', 'right'];
-    var dirLabels = ['\u25B2', '\u25C0', '\u25BC', '\u25B6'];
+    var dirSymbols = ['\u25B2', '\u25C0', '\u25BC', '\u25B6'];
     for (var d = 0; d < dirs.length; d++) {
       var db = document.createElement('button');
       db.className = 'ed-tool' + (editor.tunnelDir === dirs[d] && editor.activeColor !== -1 ? ' active' : '');
       db.style.background = 'linear-gradient(135deg,#3D3548,#252030)';
-      db.style.color = '#FFD080';
-      db.style.fontSize = '16px';
-      db.innerHTML = dirLabels[d];
+      db.innerHTML = dirSymbols[d];
       db.title = dirs[d];
       db.setAttribute('data-dir', dirs[d]);
       db.addEventListener('click', function () {
@@ -254,16 +295,12 @@ function editorRenderToolbar() {
       dirRow.appendChild(db);
     }
     el.appendChild(dirRow);
-  } else if (editor.wallMode) {
-    // Wall mode: just show info hint
-    var wallInfo = document.createElement('div');
-    wallInfo.className = 'ed-color-row';
-    wallInfo.innerHTML = '<span style="font-size:11px;color:#9C8A70">Click cells to place/remove walls</span>';
-    el.appendChild(wallInfo);
   } else {
-    // Color palette: eraser + 8 colors
+    // Color palette row
     var colorRow = document.createElement('div');
     colorRow.className = 'ed-color-row';
+
+    // Eraser
     var eraser = document.createElement('button');
     eraser.className = 'ed-tool' + (editor.activeColor === -1 ? ' active' : '');
     eraser.style.background = 'rgba(180,165,145,0.5)';
@@ -405,7 +442,14 @@ function editorRenderTunnelPanel() {
       var typeEl = document.getElementById('ed-tunnel-add-type');
       var type = typeEl ? typeEl.value : 'default';
       if (editor.selectedTunnel >= 0 && editor.grid[editor.selectedTunnel]) {
-        editor.grid[editor.selectedTunnel].contents.push({ ci: ci4, type: type });
+        var newItem = { ci: ci4, type: type };
+        // If adding a pack to tunnel, give it random colors
+        if (type === 'pack') {
+          var pc = pickPackColors();
+          pc[0] = ci4;
+          newItem.packColors = pc;
+        }
+        editor.grid[editor.selectedTunnel].contents.push(newItem);
         editorRenderGrid();
         editorRenderTunnelPanel();
         editorUpdateStats();
@@ -426,23 +470,106 @@ function editorRenderTunnelPanel() {
   }
 }
 
+// ── NEW: Pack color editor panel ──
+function editorRenderPackPanel() {
+  var container = document.getElementById('ed-pack-panel');
+  if (!container) return;
+
+  if (editor.selectedPack < 0 || !editor.grid[editor.selectedPack] || editor.grid[editor.selectedPack].type !== 'pack') {
+    container.style.display = 'none';
+    return;
+  }
+
+  container.style.display = 'block';
+  var pack = editor.grid[editor.selectedPack];
+  var pc = pack.packColors || [pack.ci, (pack.ci + 1) % NUM_COLORS, (pack.ci + 2) % NUM_COLORS];
+  var html = '';
+
+  html += '<div class="ed-section-title"><span class="icon">&#127912;</span> Marble Pack #' + (editor.selectedPack + 1) + ' — Colors</div>';
+  html += '<div style="font-size:10px;color:#9C8A70;margin-bottom:6px">3 colors &times; 3 marbles each = 9 marbles total</div>';
+
+  for (var slot = 0; slot < 3; slot++) {
+    html += '<div style="display:flex;align-items:center;gap:6px;margin:6px 0">';
+    html += '<span style="font-size:11px;color:#8B6914;width:50px">Color ' + (slot + 1) + ':</span>';
+    html += '<div class="ed-tunnel-add-colors" style="margin:0">';
+    for (var ci = 0; ci < NUM_COLORS; ci++) {
+      var isActive = (pc[slot] === ci);
+      var usedByOther = false;
+      for (var os = 0; os < 3; os++) {
+        if (os !== slot && pc[os] === ci) { usedByOther = true; break; }
+      }
+      var style = 'background:' + COLORS[ci].fill + ';';
+      if (isActive) style += 'box-shadow:0 0 0 2px #fff,0 0 0 4px ' + COLORS[ci].dark + ';transform:scale(1.15);';
+      if (usedByOther) style += 'opacity:0.3;cursor:not-allowed;';
+      html += '<button class="ed-tunnel-add-clr ed-pack-clr-btn" data-slot="' + slot + '" data-ci="' + ci + '"' +
+        (usedByOther ? ' disabled' : '') +
+        ' style="' + style + '">' + CLR_NAMES[ci][0].toUpperCase() + '</button>';
+    }
+    html += '</div>';
+    html += '</div>';
+  }
+
+  html += '<div style="text-align:center;margin-top:8px"><button class="ed-qbtn" id="ed-pack-randomize">&#127922; Randomize Colors</button></div>';
+
+  container.innerHTML = html;
+
+  // Bind color change events
+  var clrBtns = container.querySelectorAll('.ed-pack-clr-btn');
+  for (var b = 0; b < clrBtns.length; b++) {
+    clrBtns[b].addEventListener('click', function () {
+      if (this.disabled) return;
+      var slot = parseInt(this.getAttribute('data-slot'));
+      var ci = parseInt(this.getAttribute('data-ci'));
+      if (editor.selectedPack >= 0 && editor.grid[editor.selectedPack]) {
+        var p = editor.grid[editor.selectedPack];
+        // Check this color isn't already used in another slot
+        for (var os = 0; os < 3; os++) {
+          if (os !== slot && p.packColors[os] === ci) return;
+        }
+        p.packColors[slot] = ci;
+        p.ci = p.packColors[0];
+        editorRenderGrid();
+        editorRenderPackPanel();
+        editorUpdateStats();
+      }
+    });
+  }
+
+  // Bind randomize
+  var randBtn = document.getElementById('ed-pack-randomize');
+  if (randBtn) {
+    randBtn.addEventListener('click', function () {
+      if (editor.selectedPack >= 0 && editor.grid[editor.selectedPack]) {
+        var p = editor.grid[editor.selectedPack];
+        p.packColors = pickPackColors();
+        p.ci = p.packColors[0];
+        editorRenderGrid();
+        editorRenderPackPanel();
+        editorUpdateStats();
+      }
+    });
+  }
+}
+
 // ── Quick actions ──
 function editorFillRandom() {
   for (var i = 0; i < 49; i++) editor.grid[i] = null;
   editor.selectedTunnel = -1;
+  editor.selectedPack = -1;
   var cl = [];
   for (var c = 0; c < 4; c++) for (var n = 0; n < 6; n++) cl.push(c);
   shuffle(cl);
   var indices = []; for (var i = 0; i < 49; i++) indices.push(i);
   shuffle(indices);
   for (var i = 0; i < cl.length; i++) editor.grid[indices[i]] = { ci: cl[i], type: 'default' };
-  editorRenderGrid(); editorUpdateStats(); editorRenderTunnelPanel();
+  editorRenderGrid(); editorUpdateStats(); editorRenderTunnelPanel(); editorRenderPackPanel();
 }
 
 function editorClearAll() {
   for (var i = 0; i < 49; i++) editor.grid[i] = null;
   editor.selectedTunnel = -1;
-  editorRenderGrid(); editorUpdateStats(); editorRenderTunnelPanel();
+  editor.selectedPack = -1;
+  editorRenderGrid(); editorUpdateStats(); editorRenderTunnelPanel(); editorRenderPackPanel();
 }
 
 // ── Stats ──
@@ -467,7 +594,12 @@ function editorUpdateStats() {
         for (var tc = 0; tc < v.contents.length; tc++) {
           var tItem = v.contents[tc];
           counts[tItem.ci]++;
-          if (tItem.type === 'blocker') {
+          // MODIFIED: Handle pack in tunnel stats
+          if (tItem.type === 'pack' && tItem.packColors) {
+            for (var pc = 0; pc < tItem.packColors.length; pc++) {
+              regularMrb[tItem.packColors[pc]] += PACK_MARBLES_PER_COLOR;
+            }
+          } else if (tItem.type === 'blocker') {
             regularMrb[tItem.ci] += Math.max(0, editor.mrbPerBox - BLOCKER_PER_BOX);
             totalBlockers += BLOCKER_PER_BOX;
           } else {
@@ -481,7 +613,12 @@ function editorUpdateStats() {
       counts[v.ci]++;
       total++;
       typeCounts[v.type] = (typeCounts[v.type] || 0) + 1;
-      if (v.type === 'blocker') {
+      // MODIFIED: Handle pack in grid stats
+      if (v.type === 'pack' && v.packColors) {
+        for (var pc = 0; pc < v.packColors.length; pc++) {
+          regularMrb[v.packColors[pc]] += PACK_MARBLES_PER_COLOR;
+        }
+      } else if (v.type === 'blocker') {
         regularMrb[v.ci] += Math.max(0, editor.mrbPerBox - BLOCKER_PER_BOX);
         totalBlockers += BLOCKER_PER_BOX;
       } else {
@@ -632,6 +769,7 @@ function editorImportJSON() {
       if (nameEl) nameEl.value = editor.name;
       if (descEl) descEl.value = editor.desc;
       editor.selectedTunnel = -1;
+      editor.selectedPack = -1;
       ta.style.display = 'none';
       editorBuildUI();
       editorShowToast('Imported!');

@@ -99,6 +99,25 @@ function drawBoxMarblesWithBlockers(ci, remaining, blockerCount) {
   }
 }
 
+// NEW: Draw pack marbles (multi-color)
+function drawBoxMarblesPack(packColors, remaining) {
+  if (remaining <= 0) return;
+  var mr = Math.min(7 * S, L.bw / 8.5);
+  var mg = Math.min(14 * S, L.bw / 4.2);
+  var mgY = mg * MRB_GAP_FACTOR;
+  var gone = MRB_PER_BOX - remaining;
+  var mrbsToDraw = [];
+  for (var si = gone; si < MRB_PER_BOX; si++) {
+    var mci = getPackMarbleColor(packColors, si);
+    mrbsToDraw.push({ r: SNAKE_ORDER[si].r, c: SNAKE_ORDER[si].c, ci: mci });
+  }
+  mrbsToDraw.sort(function (a, b) { return a.r - b.r; });
+  for (var si = 0; si < mrbsToDraw.length; si++) {
+    var sp = mrbsToDraw[si];
+    drawMarble((sp.c - 1) * mg, (sp.r - 1) * mgY - 2 * S, mr, sp.ci);
+  }
+}
+
 function drawBoxLip(ci) {
   ctx.save();
   var lipH = L.bh * LIP_PCT;
@@ -208,15 +227,19 @@ function drawStock() {
 
     if (b.revealT > 0) {
       var phase = 1 - b.revealT;
-      bt.drawReveal(ctx, -L.bw / 2, -L.bh / 2, L.bw, L.bh, b.ci, S, phase, b.remaining, tick);
+      // MODIFIED: pass stockItem b for pack support
+      bt.drawReveal(ctx, -L.bw / 2, -L.bh / 2, L.bw, L.bh, b.ci, S, phase, b.remaining, tick, b);
     } else if (!b.revealed) {
       var idleWobble = Math.sin(tick * 0.02 + b.idlePhase) * 0.006;
       ctx.rotate(idleWobble);
-      bt.drawClosed(ctx, -L.bw / 2, -L.bh / 2, L.bw, L.bh, b.ci, S, tick, b.idlePhase);
+      // MODIFIED: pass stockItem b for pack support
+      bt.drawClosed(ctx, -L.bw / 2, -L.bh / 2, L.bw, L.bh, b.ci, S, tick, b.idlePhase, b);
     } else {
-      var c = COLORS[b.ci];
+      // MODIFIED: use displayCi for pack boxes (use first pack color)
+      var displayCi = (b.boxType === 'pack' && b.packColors) ? b.packColors[0] : b.ci;
+      var c = COLORS[displayCi];
       if (isBoxTappable(i) && b.hoverT > 0.01) { ctx.shadowColor = c.glow; ctx.shadowBlur = 20 * S * b.hoverT; }
-      drawBox(-L.bw / 2, -L.bh / 2, L.bw, L.bh, b.ci);
+      drawBox(-L.bw / 2, -L.bh / 2, L.bw, L.bh, displayCi);
       ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0;
       if (b.boxType === 'blocker' && b.blockerCount > 0) {
         ctx.save();
@@ -230,12 +253,17 @@ function drawStock() {
         ctx.restore();
       }
       if (b.remaining > 0) {
-        if (b.boxType === 'blocker' && b.blockerCount > 0) {
+        // MODIFIED: handle pack marbles
+        if (b.boxType === 'pack' && b.packColors) {
+          drawBoxMarblesPack(b.packColors, b.remaining);
+          drawBoxLip(b.packColors[0]);
+        } else if (b.boxType === 'blocker' && b.blockerCount > 0) {
           drawBoxMarblesWithBlockers(b.ci, b.remaining, b.blockerCount);
+          drawBoxLip(b.ci);
         } else {
           drawBoxMarbles(b.ci, b.remaining);
+          drawBoxLip(b.ci);
         }
-        drawBoxLip(b.ci);
       }
     }
 
