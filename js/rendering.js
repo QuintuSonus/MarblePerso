@@ -3,6 +3,7 @@
 // ============================================================
 // drawStock delegates closed/reveal states to BoxTypes registry.
 // Open (tappable) state is the same for all box types.
+// Ice overlay is drawn on top of revealed boxes with iceHP > 0.
 // ============================================================
 
 function rRect(x, y, w, h, r) {
@@ -195,6 +196,23 @@ function drawStock() {
       drawBox(-L.bw / 2, -L.bh / 2, L.bw, L.bh, b.ci);
       ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0;
       if (b.remaining > 0) { drawBoxMarbles(b.ci, b.remaining); drawBoxLip(b.ci); }
+    }
+
+    // ── Ice overlay (drawn on top of the box) ──
+    if (b.iceHP > 0) {
+      var iceType = getBoxType('ice');
+      if (iceType && iceType.drawIceOverlay) {
+        iceType.drawIceOverlay(ctx, -L.bw / 2, -L.bh / 2, L.bw, L.bh, S, b.iceHP, tick);
+      }
+    }
+
+    // ── Ice shatter flash (fading white glow after ice breaks) ──
+    if (b.iceShatterT > 0) {
+      ctx.save();
+      ctx.globalAlpha = b.iceShatterT * 0.4;
+      ctx.fillStyle = 'rgba(200,235,255,1)';
+      rRect(-L.bw / 2, -L.bh / 2, L.bw, L.bh, 6 * S); ctx.fill();
+      ctx.restore();
     }
 
     ctx.restore();
