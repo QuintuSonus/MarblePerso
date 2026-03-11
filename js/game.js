@@ -171,6 +171,28 @@ function initGame() {
     }
   }
 
+  // ── Reveal boxes adjacent to initially empty/tunnel cells ──
+  // Run multiple passes so reveals cascade through clusters of empty cells
+  var changed = true;
+  while (changed) {
+    changed = false;
+    for (var i = 0; i < stock.length; i++) {
+      if (!isCellTrulyEmpty(i)) continue;
+      var row2 = Math.floor(i / L.cols), col2 = i % L.cols;
+      var nbrs = [];
+      if (row2 > 0)          nbrs.push((row2 - 1) * L.cols + col2);
+      if (row2 < L.rows - 1) nbrs.push((row2 + 1) * L.cols + col2);
+      if (col2 > 0)          nbrs.push(row2 * L.cols + (col2 - 1));
+      if (col2 < L.cols - 1) nbrs.push(row2 * L.cols + (col2 + 1));
+      for (var ni = 0; ni < nbrs.length; ni++) {
+        var nb = stock[nbrs[ni]];
+        if (nb.isTunnel || nb.empty || nb.used || nb.revealed) continue;
+        nb.revealed = true;
+        changed = true;
+      }
+    }
+  }
+
   // ── Sort columns ──
   var allBoxes = [];
   for (var c = 0; c < NUM_COLORS; c++) for (var r = 0; r < sortPerColor[c]; r++)
@@ -188,8 +210,40 @@ function initGame() {
   }
 }
 
-// === ADJACENCY REVEAL ===
-function revealAdjacentBoxes(idx) {
+// === EMPTY-CELL REVEAL ===
+// A cell is "truly empty" when:
+//  • it's an empty slot or a used-up box, AND no tunnel will spawn onto it
+//  • OR it's a depleted tunnel (0 contents left, exit tile also free)
+function isCellTrulyEmpty(idx) {
+  var s = stock[idx];
+  if (!s) return false;
+  if (s.isTunnel) {
+    // A depleted tunnel counts as empty — its cell is effectively inert
+    if (s.tunnelContents && s.tunnelContents.length > 0) return false;
+    // Also check that the exit tile isn't still occupied by an active box
+    var exitIdx = getTunnelExitIdx(idx);
+    if (exitIdx >= 0 && stock[exitIdx] && !stock[exitIdx].isTunnel
+        && !stock[exitIdx].empty && !stock[exitIdx].used) return false;
+    return true;
+  }
+  if (!s.empty && !s.used) return false; // still has a live box
+  // Check if any tunnel's exit points here with remaining contents
+  for (var i = 0; i < stock.length; i++) {
+    if (stock[i].isTunnel && stock[i].tunnelContents && stock[i].tunnelContents.length > 0) {
+      if (getTunnelExitIdx(i) === idx) return false;
+    }
+  }
+  return true;
+}
+
+// Reveal unrevealed neighbors of a cell that just became truly empty.
+// Also cascades through adjacent depleted tunnels.
+var _revealVisited = {};
+function revealAroundEmptyCell(idx) {
+  if (!isCellTrulyEmpty(idx)) return;
+  // Guard against infinite recursion (adjacent depleted tunnels)
+  if (_revealVisited[idx]) return;
+  _revealVisited[idx] = true;
   var row = Math.floor(idx / L.cols), col = idx % L.cols;
   var neighbors = [];
   if (row > 0)          neighbors.push((row - 1) * L.cols + col);
@@ -197,8 +251,13 @@ function revealAdjacentBoxes(idx) {
   if (col > 0)          neighbors.push(row * L.cols + (col - 1));
   if (col < L.cols - 1) neighbors.push(row * L.cols + (col + 1));
   for (var ni = 0; ni < neighbors.length; ni++) {
-    var nb = stock[neighbors[ni]];
-    if (nb.isTunnel) continue;  // tunnels are always visible
+    var nIdx = neighbors[ni];
+    var nb = stock[nIdx];
+    // Cascade: if neighbor is a depleted tunnel, reveal around it too
+    if (nb.isTunnel) {
+      if (isCellTrulyEmpty(nIdx)) revealAroundEmptyCell(nIdx);
+      continue;
+    }
     if (nb.empty || nb.used || nb.revealed || nb.spawning) continue;
     nb.revealed = true;
     nb.revealT = 1.0;
@@ -211,6 +270,7 @@ function revealAdjacentBoxes(idx) {
     }
     sfx.pop();
   }
+  _revealVisited[idx] = false;
 }
 
 // === ICE DAMAGE ===
@@ -287,7 +347,6 @@ function handleTap(px, py) {
       sfx.pop();
       spawnBurst(b.x + L.bw / 2, b.y + L.bh / 2, COLORS[b.ci].fill, 18);
       spawnPhysMarbles(b);
-      revealAdjacentBoxes(i);
       damageAdjacentIce(i);
       return;
     }
