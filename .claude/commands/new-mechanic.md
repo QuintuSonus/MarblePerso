@@ -16,11 +16,11 @@ Follow the "Prototyping New Mechanics" workflow in CLAUDE.md:
    - Description of what the mechanic does and how it works
    - The test level JSON to paste into "Import Level"
    - Manual testing instructions
-   - Preview URL: `https://quintusonus.github.io/MarblePerso/preview/<mechanic-name>/`
+   - Preview URL: `https://raw.githack.com/QuintuSonus/MarblePerso/<branch-name>/index.html`
 
-After opening the PR, tell me:
-- The PR URL
-- The preview URL (will be live ~1 minute after push)
+After pushing, tell me:
+- The PR URL (if created)
+- The preview URL: `https://raw.githack.com/QuintuSonus/MarblePerso/<branch-name>/index.html` (works instantly after push, no build needed)
 - How to test: open the preview URL, click "Import Level", paste the test level JSON
 
 If anything about my mechanic description is ambiguous, ask me BEFORE you start coding.

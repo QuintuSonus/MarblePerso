@@ -25,10 +25,13 @@ Claude will handle branching, implementation, testing, and deployment automatica
 
 ### Preview URLs
 
-Each `mechanic/*` branch is automatically deployed to:
-`https://quintusonus.github.io/MarblePerso/preview/<mechanic-name>/`
+After pushing a branch, a playable preview is immediately available via raw.githack.com:
+`https://raw.githack.com/QuintuSonus/MarblePerso/<branch-name>/index.html`
 
-After pushing, wait ~1 minute for the GitHub Action to deploy. Share this URL with the team for feedback.
+For example, a branch `claude/add-magnet-box-mechanic-abc123` would be testable at:
+`https://raw.githack.com/QuintuSonus/MarblePerso/claude/add-magnet-box-mechanic-abc123/index.html`
+
+No build step or GitHub Action needed — the URL works instantly after push. Share this URL with the team for feedback.
 
 ### Two-Tier Mechanic Classification
 
@@ -66,7 +69,7 @@ When implementing a new mechanic, follow these steps in order:
 7. **Push & PR**: Push branch, open a PR including:
    - Description of what the mechanic does
    - The test level JSON (so reviewers can paste it into Import Level)
-   - Preview URL: `https://quintusonus.github.io/MarblePerso/preview/<mechanic-name>/`
+   - Preview URL: `https://raw.githack.com/QuintuSonus/MarblePerso/<branch-name>/index.html`
 
 ### What NOT To Do
 
