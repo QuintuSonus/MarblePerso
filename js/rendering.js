@@ -6,6 +6,7 @@
 // Ice overlay is drawn on top of revealed boxes with iceHP > 0.
 // Tunnel entries are drawn via drawTunnelOnGrid.
 // Wall cells are drawn via drawWallOnGrid.
+// Rocket cores are drawn via drawRocketCoreOnGrid.
 // ============================================================
 
 function rRect(x, y, w, h, r) {
@@ -99,7 +100,7 @@ function drawBoxMarblesWithBlockers(ci, remaining, blockerCount) {
   }
 }
 
-// NEW: Draw pack marbles (multi-color)
+// Draw pack marbles (multi-color)
 function drawBoxMarblesPack(packColors, remaining) {
   if (remaining <= 0) return;
   var mr = Math.min(7 * S, L.bw / 8.5);
@@ -176,7 +177,7 @@ function drawFunnel() {
   ctx.restore();
 }
 
-// ── Stock grid — delegates to registered box types, handles tunnels + walls ──
+// ── Stock grid — delegates to registered box types, handles tunnels + walls + rockets ──
 
 function drawStock() {
   for (var i = 0; i < stock.length; i++) {
@@ -193,6 +194,32 @@ function drawStock() {
     // ── Wall ──
     if (b.isWall) {
       drawWallOnGrid(ctx, b.x, b.y, L.bw, L.bh, S, tick);
+      continue;
+    }
+
+    // ── Rocket Core (unlaunched) ──
+    if (b.isRocketCore && !b.rocketLaunched) {
+      drawRocketCoreOnGrid(ctx, b.x, b.y, L.bw, L.bh, S,
+        b.rocketDir, b.rocketCoreRole, tick, 0, false);
+      continue;
+    }
+    // ── Rocket Core (launching animation) ──
+    if (b.isRocketCore && b.rocketLaunched && b.rocketLaunchT > 0) {
+      var lt = b.rocketLaunchT;
+      var d = ROCKET_DIR_DELTA[b.rocketDir];
+      var slideOff = (1 - lt) * (L.bw + L.bg) * 1.5;
+      ctx.save();
+      ctx.globalAlpha = lt;
+      ctx.translate(d.dc * slideOff, d.dr * slideOff);
+      drawRocketCoreOnGrid(ctx, b.x, b.y, L.bw, L.bh, S,
+        b.rocketDir, b.rocketCoreRole, tick, lt, true);
+      ctx.restore();
+      // Draw the underlying box fading in
+      ctx.save();
+      ctx.globalAlpha = 1 - lt;
+      var underCi = b.rocketUnderCi !== undefined ? b.rocketUnderCi : 0;
+      drawBox(b.x, b.y, L.bw, L.bh, underCi);
+      ctx.restore();
       continue;
     }
 
@@ -227,15 +254,12 @@ function drawStock() {
 
     if (b.revealT > 0) {
       var phase = 1 - b.revealT;
-      // MODIFIED: pass stockItem b for pack support
       bt.drawReveal(ctx, -L.bw / 2, -L.bh / 2, L.bw, L.bh, b.ci, S, phase, b.remaining, tick, b);
     } else if (!b.revealed) {
       var idleWobble = Math.sin(tick * 0.02 + b.idlePhase) * 0.006;
       ctx.rotate(idleWobble);
-      // MODIFIED: pass stockItem b for pack support
       bt.drawClosed(ctx, -L.bw / 2, -L.bh / 2, L.bw, L.bh, b.ci, S, tick, b.idlePhase, b);
     } else {
-      // MODIFIED: use displayCi for pack boxes (use first pack color)
       var displayCi = (b.boxType === 'pack' && b.packColors) ? b.packColors[0] : b.ci;
       var c = COLORS[displayCi];
       if (isBoxTappable(i) && b.hoverT > 0.01) { ctx.shadowColor = c.glow; ctx.shadowBlur = 20 * S * b.hoverT; }
@@ -253,7 +277,6 @@ function drawStock() {
         ctx.restore();
       }
       if (b.remaining > 0) {
-        // MODIFIED: handle pack marbles
         if (b.boxType === 'pack' && b.packColors) {
           drawBoxMarblesPack(b.packColors, b.remaining);
           drawBoxLip(b.packColors[0]);
@@ -424,35 +447,20 @@ function drawSortArea() {
 
       if (b.type === 'lock') {
         var isTop = (vi === 0);
-        var pulse = isTop ? 1 + Math.sin(tick * 0.08) * 0.03 : 1;
-        ctx.scale(pulse, pulse);
-        ctx.shadowColor = 'rgba(0,0,0,0.25)'; ctx.shadowBlur = 5 * S; ctx.shadowOffsetY = 3 * S;
-        var grad = ctx.createLinearGradient(0, -L.sBh / 2, 0, L.sBh / 2);
-        if (b.triggered) { grad.addColorStop(0, '#7BC67B'); grad.addColorStop(1, '#4AA04A'); }
-        else if (isTop) { grad.addColorStop(0, '#FFD966'); grad.addColorStop(1, '#E8A84C'); }
-        else { grad.addColorStop(0, '#B8A898'); grad.addColorStop(1, '#9A8A78'); }
-        ctx.fillStyle = grad;
+        var pulse = isTop ? 0.85 + Math.sin(tick * 0.06) * 0.15 : 0.5;
+        ctx.fillStyle = 'rgba(200,180,100,' + pulse + ')';
         rRect(-L.sBw / 2, -L.sBh / 2, L.sBw, L.sBh, 8 * S); ctx.fill();
-        ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
-        if (b.shineT > 0) { ctx.fillStyle = 'rgba(255,255,255,' + b.shineT * 0.5 + ')'; rRect(-L.sBw / 2, -L.sBh / 2, L.sBw, L.sBh, 8 * S); ctx.fill(); }
-        var iconS = Math.min(L.sBh * 0.35, L.sBw * 0.15);
-        if (!b.triggered) {
-          ctx.fillStyle = 'rgba(0,0,0,0.35)';
-          rRect(-iconS * 0.6, -iconS * 0.2, iconS * 1.2, iconS * 0.9, 2 * S); ctx.fill();
-          ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = 2 * S; ctx.lineCap = 'round';
-          ctx.beginPath(); ctx.arc(0, -iconS * 0.2, iconS * 0.4, -Math.PI, 0); ctx.stroke();
-        } else {
-          ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = 3 * S; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-          ctx.beginPath(); ctx.moveTo(-iconS * 0.5, 0); ctx.lineTo(-iconS * 0.1, iconS * 0.4); ctx.lineTo(iconS * 0.5, -iconS * 0.3); ctx.stroke();
-        }
+        ctx.strokeStyle = 'rgba(160,140,60,0.5)'; ctx.lineWidth = 1.5 * S;
+        rRect(-L.sBw / 2, -L.sBh / 2, L.sBw, L.sBh, 8 * S); ctx.stroke();
+        ctx.fillStyle = 'rgba(139,105,20,' + (isTop ? 0.8 : 0.4) + ')';
+        ctx.font = 'bold ' + (L.sBh * 0.45) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('\uD83D\uDD12', 0, 0);
       } else {
-        ctx.shadowColor = 'rgba(0,0,0,0.22)'; ctx.shadowBlur = 5 * S; ctx.shadowOffsetY = 3 * S;
         var sc = COLORS[b.ci];
-        var sGrad = ctx.createLinearGradient(-L.sBw / 2, -L.sBh / 2, -L.sBw / 2, L.sBh / 2);
-        sGrad.addColorStop(0, sc.light); sGrad.addColorStop(1, sc.fill);
-        ctx.fillStyle = sGrad;
+        var sortGrad = ctx.createLinearGradient(0, -L.sBh / 2, 0, L.sBh / 2);
+        sortGrad.addColorStop(0, sc.light); sortGrad.addColorStop(1, sc.dark);
+        ctx.fillStyle = sortGrad;
         rRect(-L.sBw / 2, -L.sBh / 2, L.sBw, L.sBh, 8 * S); ctx.fill();
-        ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
         ctx.strokeStyle = sc.dark; ctx.lineWidth = 1 * S;
         rRect(-L.sBw / 2, -L.sBh / 2, L.sBw, L.sBh, 8 * S); ctx.stroke();
         if (b.shineT > 0) { ctx.fillStyle = 'rgba(255,255,255,' + b.shineT * 0.35 + ')'; rRect(-L.sBw / 2, -L.sBh / 2, L.sBw, L.sBh, 8 * S); ctx.fill(); }

@@ -114,7 +114,7 @@ function spawnPhysMarbles(box) {
         var my = b.y + L.bh / 2 + (si.r - 1) * mgY - 2 * S;
         var vx = (Math.random() - 0.5) * 2 * S;
         var vy = -(2 + Math.random() * 2) * S;
-        // MODIFIED: Handle pack colors
+        // Handle pack colors
         var marbleCi;
         if (b.boxType === 'pack' && b.packColors) {
           marbleCi = getPackMarbleColor(b.packColors, spawnIdx);

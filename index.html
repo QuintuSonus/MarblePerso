@@ -161,6 +161,17 @@
     display:flex;align-items:center;justify-content:center}
   .ed-tunnel-add-clr:hover{transform:scale(1.15);border-color:rgba(255,255,255,0.7)}
   .ed-tunnel-add-clr:active{transform:scale(0.9)}
+  /* ═══ ROCKET EDITOR ═══ */
+  #ed-rocket-panel{display:none;background:rgba(255,107,53,0.06);border-radius:12px;padding:10px 12px;
+    border:1.5px solid rgba(255,107,53,0.25)}
+  .ed-rocket-info{font-size:10px;color:#9C8A70;margin:4px 0}
+  .ed-rocket-color-row{display:flex;gap:3px;justify-content:center;flex-wrap:wrap;margin:6px 0}
+  .ed-rocket-clr{width:28px;height:28px;border:2px solid rgba(255,255,255,0.3);border-radius:6px;
+    color:white;font-weight:700;font-size:11px;font-family:'Fredoka',sans-serif;
+    cursor:pointer;transition:transform 0.12s;text-shadow:0 1px 2px rgba(0,0,0,0.2);
+    display:flex;align-items:center;justify-content:center}
+  .ed-rocket-clr:hover{transform:scale(1.15);border-color:rgba(255,255,255,0.7)}
+  .ed-rocket-clr.active-clr{box-shadow:0 0 0 2px #fff,0 0 0 4px rgba(255,107,53,0.6);transform:scale(1.15)}
 </style>
 </head>
 <body>
@@ -230,6 +241,9 @@
     <div class="ed-section" id="ed-tunnel-panel">
       <!-- Tunnel contents editor — populated dynamically -->
     </div>
+    <div class="ed-section" id="ed-rocket-panel">
+      <!-- Rocket editor — populated dynamically -->
+    </div>
     <div class="ed-section">
       <div class="ed-section-title"><span class="icon">&#9881;</span> Settings</div>
       <div id="ed-settings-body"></div>
@@ -266,6 +280,7 @@
 <script src="js/physics.js"></script>
 <script src="js/tunnel.js"></script>
 <script src="js/wall.js"></script>
+<script src="js/rocket.js"></script>
 <script src="js/rendering.js"></script>
 <script src="js/editor.js"></script>
 <script src="js/game.js"></script>

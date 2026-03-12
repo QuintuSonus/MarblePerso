@@ -3,6 +3,7 @@
 //           + Tunnel spawning integration
 //           + Wall cell support
 //           + Pack box support
+//           + Rocket mechanic support
 // ============================================================
 
 // === LEVEL SELECT ===
@@ -61,6 +62,9 @@ function startLevel(idx) {
   blockerCollectT = 0;
   blockerCollectSlots = [];
   blockerCollectCleared = false;
+  // ROCKET: reset rocket state
+  rocketProjectiles = [];
+  rocketActivationQueue = [];
   resize();
   initBeltSlots();
   gameActive = true;
@@ -74,6 +78,13 @@ function startLevel(idx) {
       else if (cell.wall) { boxSlots.push(null); tunnelSlots.push(null); wallSlots.push({ wall: true }); }
       else if (cell.tunnel) { boxSlots.push(null); tunnelSlots.push({ dir: cell.dir || 'bottom', contents: cell.contents || [] }); wallSlots.push(null); }
       else if (typeof cell === 'number') { boxSlots.push(cell >= 0 ? { ci: cell, boxType: 'default' } : null); tunnelSlots.push(null); wallSlots.push(null); }
+      // ROCKET: only core cells are stored in the grid
+      else if (cell.rocket) {
+        boxSlots.push({ ci: 0, boxType: 'default', packColors: null,
+          rocket: true, rocketId: cell.rocketId,
+          rocketDir: cell.rocketDir, rocketUnderCi: cell.underCi, rocketUnderType: cell.underType || 'default' });
+        tunnelSlots.push(null); wallSlots.push(null);
+      }
       else { boxSlots.push({ ci: cell.ci, boxType: cell.type || 'default', packColors: cell.packColors || null }); tunnelSlots.push(null); wallSlots.push(null); }
     }
   } else {
@@ -95,7 +106,12 @@ function startLevel(idx) {
   for (var g = 0; g < boxSlots.length; g++) {
     var slot = boxSlots[g];
     if (!slot) continue;
-    // MODIFIED: Handle pack boxes
+    // ROCKET: core cells have under-boxes that contribute marbles
+    if (slot.rocket) {
+      var rUnderCi = slot.rocketUnderCi !== undefined ? slot.rocketUnderCi : 0;
+      colorMarblesTotal[rUnderCi] += MRB_PER_BOX;
+      continue;
+    }
     var isBlockerBox = (slot.boxType === 'blocker');
     var isPackBox = (slot.boxType === 'pack');
     if (isPackBox && slot.packColors) {
@@ -115,7 +131,6 @@ function startLevel(idx) {
     if (!tSlot || !tSlot.contents) continue;
     for (var tc = 0; tc < tSlot.contents.length; tc++) {
       var tItem = tSlot.contents[tc];
-      // MODIFIED: Handle pack boxes in tunnels
       var isBlockerBox = (tItem.type === 'blocker');
       var isPackBox = (tItem.type === 'pack');
       if (isPackBox && tItem.packColors) {
@@ -159,7 +174,7 @@ function startLevel(idx) {
         shakeT: 0, hoverT: 0, popT: 0, revealT: 0, emptyT: 0, idlePhase: 0
       });
     } else if (wSlot) {
-      // Wall cell — inert structural element
+      // Wall cell
       stock.push({
         isWall: true, isTunnel: false,
         ci: 0, used: false, remaining: 0, spawning: false, spawnIdx: 0,
@@ -180,10 +195,15 @@ function startLevel(idx) {
       var isIce = (slot.boxType === 'ice');
       var isBlocker = (slot.boxType === 'blocker');
       var isPack = (slot.boxType === 'pack');
-      // MODIFIED: Include packColors in stock item
-      stock.push({ ci: slot.ci, used: false, remaining: MRB_PER_BOX, spawning: false, spawnIdx: 0,
-        revealed: isIce ? true : false, empty: false,
-        boxType: slot.boxType || 'default', isTunnel: false, isWall: false,
+      var isRocketCore = (slot.rocket && slot.rocketRole === 'core');
+
+      stock.push({ ci: slot.ci, used: false,
+        remaining: isRocketCore ? 0 : MRB_PER_BOX,
+        spawning: false, spawnIdx: 0,
+        revealed: isIce ? true : (isRocketCore ? true : false),
+        empty: false,
+        boxType: isRocketCore ? 'default' : (slot.boxType || 'default'),
+        isTunnel: false, isWall: false,
         iceHP: isIce ? 2 : 0,
         iceCrackT: 0, iceShatterT: 0,
         blockerCount: isBlocker ? BLOCKER_PER_BOX : 0,
@@ -191,6 +211,54 @@ function startLevel(idx) {
         x: L.sx + c * (L.bw + L.bg), y: L.sy + r * (L.bh + L.bg),
         shakeT: 0, hoverT: 0, popT: 0, revealT: 0, emptyT: 0,
         idlePhase: Math.random() * Math.PI * 2 });
+
+      // ROCKET: add rocket core properties
+      if (slot.rocket) {
+        var lastStock = stock[stock.length - 1];
+        lastStock.isRocketCore = true;
+        lastStock.rocketId = slot.rocketId;
+        lastStock.rocketDir = slot.rocketDir;
+        lastStock.rocketLaunched = false;
+        lastStock.rocketLaunchT = 0;
+        lastStock.rocketUnderCi = slot.rocketUnderCi !== undefined ? slot.rocketUnderCi : 0;
+        lastStock.rocketUnderType = slot.rocketUnderType || 'default';
+        lastStock.rocketCoreRole = 0; // assigned below
+      }
+    }
+  }
+
+  // ── Assign rocket core roles (0=back/engine, 1=front/nose) ──
+  // ── Compute trigger cells from back cores ──
+  var rocketIds = {};
+  for (var i = 0; i < stock.length; i++) {
+    if (stock[i].isRocketCore) {
+      if (!rocketIds[stock[i].rocketId]) rocketIds[stock[i].rocketId] = [];
+      rocketIds[stock[i].rocketId].push(i);
+    }
+  }
+  rocketTriggerCells = {};
+  for (var rid in rocketIds) {
+    var cores = rocketIds[rid];
+    if (cores.length === 2) {
+      var dir = stock[cores[0]].rocketDir;
+      var d = ROCKET_DIR_DELTA[dir];
+      // The back core is the one closer to the trigger (opposite direction from launch)
+      var r0 = Math.floor(cores[0] / L.cols), c0 = cores[0] % L.cols;
+      var r1 = Math.floor(cores[1] / L.cols), c1 = cores[1] % L.cols;
+      // Back core is the one whose position in the launch direction is smaller
+      var proj0 = r0 * d.dr + c0 * d.dc;
+      var proj1 = r1 * d.dr + c1 * d.dc;
+      if (proj0 <= proj1) {
+        stock[cores[0]].rocketCoreRole = 0; // back
+        stock[cores[1]].rocketCoreRole = 1; // nose
+        var trigIdx = getRocketTriggerIdx(cores[0], dir, L.cols, L.rows);
+        if (trigIdx >= 0) rocketTriggerCells[trigIdx] = { rocketId: parseInt(rid), activated: false };
+      } else {
+        stock[cores[1]].rocketCoreRole = 0;
+        stock[cores[0]].rocketCoreRole = 1;
+        var trigIdx = getRocketTriggerIdx(cores[1], dir, L.cols, L.rows);
+        if (trigIdx >= 0) rocketTriggerCells[trigIdx] = { rocketId: parseInt(rid), activated: false };
+      }
     }
   }
 
@@ -198,7 +266,7 @@ function startLevel(idx) {
   for (var c = 0; c < L.cols; c++) {
     for (var r = L.rows - 1; r >= 0; r--) {
       var b = stock[r * L.cols + c];
-      if (!b.empty && !b.isTunnel && !b.isWall) { b.revealed = true; break; }
+      if (!b.empty && !b.isTunnel && !b.isWall && !b.isRocketCore) { b.revealed = true; break; }
     }
   }
 
@@ -217,6 +285,7 @@ function startLevel(idx) {
       for (var ni = 0; ni < nbrs.length; ni++) {
         var nb = stock[nbrs[ni]];
         if (nb.isTunnel || nb.isWall || nb.empty || nb.used || nb.revealed) continue;
+        if (nb.isRocketCore) continue; // Rocket cores aren't revealed by adjacency
         nb.revealed = true;
         changed = true;
       }
@@ -245,6 +314,7 @@ function isCellTrulyEmpty(idx) {
   var s = stock[idx];
   if (!s) return false;
   if (s.isWall) return false;
+  if (s.isRocketCore && !s.rocketLaunched) return false; // ROCKET: unlaunched cores block
   if (s.isTunnel) {
     if (s.tunnelContents && s.tunnelContents.length > 0) return false;
     var exitIdx = getTunnelExitIdx(idx);
@@ -280,6 +350,7 @@ function revealAroundEmptyCell(idx) {
       continue;
     }
     if (nb.isWall || nb.empty || nb.used || nb.revealed || nb.spawning) continue;
+    if (nb.isRocketCore) continue; // ROCKET: cores don't reveal via adjacency
     nb.revealed = true;
     nb.revealT = 1.0;
     var bx = nb.x + L.bw / 2, by = nb.y + L.bh / 2;
@@ -329,6 +400,7 @@ function isBoxTappable(idx) {
   var b = stock[idx];
   if (b.isTunnel) return false;
   if (b.isWall) return false;
+  if (b.isRocketCore) return false; // ROCKET: cores not tappable
   if (b.empty || b.used) return false;
   if (b.spawning || b.revealT > 0) return false;
   if (b.iceHP > 0) return false;
@@ -344,13 +416,12 @@ function handleTap(px, py) {
   if (px >= L.bkX && px <= L.bkX + L.bkSize && py >= L.bkY && py <= L.bkY + L.bkSize) { showLevelSelect(); return; }
   for (var i = 0; i < stock.length; i++) {
     var b = stock[i];
-    if (b.isTunnel || b.isWall) continue;
+    if (b.isTunnel || b.isWall || b.isRocketCore) continue;
     if (b.empty || b.used || b.spawning || b.revealT > 0) continue;
     if (px >= b.x && px <= b.x + L.bw && py >= b.y && py <= b.y + L.bh) {
       if (!isBoxTappable(i)) { b.shakeT = 0.5; return; }
       b.popT = 1;
       sfx.pop();
-      // MODIFIED: Use pack first color for burst
       var burstCi = (b.boxType === 'pack' && b.packColors) ? b.packColors[0] : b.ci;
       spawnBurst(b.x + L.bw / 2, b.y + L.bh / 2, COLORS[burstCi].fill, 18);
       spawnPhysMarbles(b);
@@ -368,7 +439,7 @@ canvas.addEventListener('mousemove', function (e) {
   if (e.clientX >= L.bkX && e.clientX <= L.bkX + L.bkSize && e.clientY >= L.bkY && e.clientY <= L.bkY + L.bkSize) { canvas.style.cursor = 'pointer'; return; }
   for (var i = 0; i < stock.length; i++) {
     var b = stock[i];
-    if (b.isTunnel || b.isWall) continue;
+    if (b.isTunnel || b.isWall || b.isRocketCore) continue;
     if (b.empty || b.used || b.spawning || b.revealT > 0) continue;
     if (!isBoxTappable(i)) continue;
     if (e.clientX >= b.x && e.clientX <= b.x + L.bw && e.clientY >= b.y && e.clientY <= b.y + L.bh) { hoverIdx = i; break; }
@@ -389,6 +460,9 @@ function update() {
 
   // ── Tunnel spawning ──
   trySpawnFromTunnels();
+
+  // ── Rocket updates ──
+  updateRockets();
 
   // Belt → sort matching
   for (var si = 0; si < BELT_SLOTS; si++) {
@@ -484,6 +558,7 @@ function update() {
   for (var i = 0; i < stock.length; i++) {
     var b = stock[i];
     if (b.isTunnel || b.isWall) continue;
+    if (b.isRocketCore && !b.rocketLaunched) continue; // ROCKET: skip unlaunched cores
     if (b.empty) continue;
     if (b.shakeT > 0) b.shakeT = Math.max(0, b.shakeT - 0.04);
     if (b.popT > 0) b.popT = Math.max(0, b.popT - 0.025);
@@ -540,6 +615,8 @@ function checkWin() {
       if (sortCols[c][r].vis) return;
   for (var i = 0; i < stock.length; i++) {
     if (stock[i].isTunnel && stock[i].tunnelContents && stock[i].tunnelContents.length > 0) return;
+    // ROCKET: don't win if unlaunched rockets remain
+    if (stock[i].isRocketCore && !stock[i].rocketLaunched) return;
   }
   if (!won) {
     won = true; sfx.win();
@@ -564,6 +641,7 @@ function frame() {
     drawFunnel();
     drawStock();
     drawPhysMarbles();
+    drawRocketProjectiles(); // ROCKET: draw flying projectiles
     drawBelt();
     drawBlockerProgress();
     drawJumpers();
