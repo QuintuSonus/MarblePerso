@@ -259,6 +259,9 @@ function drawStock() {
       var idleWobble = Math.sin(tick * 0.02 + b.idlePhase) * 0.006;
       ctx.rotate(idleWobble);
       bt.drawClosed(ctx, -L.bw / 2, -L.bh / 2, L.bw, L.bh, b.ci, S, tick, b.idlePhase, b);
+    } else if (b.boxType === 'magnet') {
+      // MAGNET: custom rendering for magnet boxes
+      drawMagnetBoxOpen(ctx, -L.bw / 2, -L.bh / 2, L.bw, L.bh, S, tick, b, b.magnetActive);
     } else {
       var displayCi = (b.boxType === 'pack' && b.packColors) ? b.packColors[0] : b.ci;
       var c = COLORS[displayCi];

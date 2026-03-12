@@ -114,6 +114,8 @@ function startLevel(idx) {
       colorMarblesTotal[rUnderCi] += MRB_PER_BOX;
       continue;
     }
+    // MAGNET: magnet boxes have no own marbles
+    if (slot.boxType === 'magnet') continue;
     var isBlockerBox = (slot.boxType === 'blocker');
     var isPackBox = (slot.boxType === 'pack');
     if (isPackBox && slot.packColors) {
@@ -133,6 +135,7 @@ function startLevel(idx) {
     if (!tSlot || !tSlot.contents) continue;
     for (var tc = 0; tc < tSlot.contents.length; tc++) {
       var tItem = tSlot.contents[tc];
+      if (tItem.type === 'magnet') continue; // MAGNET: no own marbles
       var isBlockerBox = (tItem.type === 'blocker');
       var isPackBox = (tItem.type === 'pack');
       if (isPackBox && tItem.packColors) {
@@ -197,10 +200,11 @@ function startLevel(idx) {
       var isIce = (slot.boxType === 'ice');
       var isBlocker = (slot.boxType === 'blocker');
       var isPack = (slot.boxType === 'pack');
+      var isMagnet = (slot.boxType === 'magnet');
       var isRocketCore = (slot.rocket && slot.rocketRole === 'core');
 
       stock.push({ ci: slot.ci, used: false,
-        remaining: isRocketCore ? 0 : MRB_PER_BOX,
+        remaining: (isRocketCore || isMagnet) ? 0 : MRB_PER_BOX,
         spawning: false, spawnIdx: 0,
         revealed: isIce ? true : (isRocketCore ? true : false),
         empty: false,
@@ -225,6 +229,13 @@ function startLevel(idx) {
         lastStock.rocketUnderCi = slot.rocketUnderCi !== undefined ? slot.rocketUnderCi : 0;
         lastStock.rocketUnderType = slot.rocketUnderType || 'default';
         lastStock.rocketCoreRole = 0; // assigned below
+      }
+      // MAGNET: add magnet properties
+      if (isMagnet) {
+        var lastStock = stock[stock.length - 1];
+        lastStock.magnetActive = false;
+        lastStock.magnetMarbles = [];
+        lastStock._magnetTimer = 0;
       }
     }
   }
@@ -422,6 +433,22 @@ function handleTap(px, py) {
     if (b.empty || b.used || b.spawning || b.revealT > 0) continue;
     if (px >= b.x && px <= b.x + L.bw && py >= b.y && py <= b.y + L.bh) {
       if (!isBoxTappable(i)) { b.shakeT = 0.5; return; }
+      // MAGNET: toggle activation instead of spawning marbles
+      if (b.boxType === 'magnet') {
+        b.popT = 1;
+        sfx.pop();
+        if (b.magnetActive) {
+          b.magnetActive = false;
+          magnetRelease(b);
+          spawnBurst(b.x + L.bw / 2, b.y + L.bh / 2, '#E74C3C', 15);
+        } else {
+          b.magnetActive = true;
+          if (!b.magnetMarbles) b.magnetMarbles = [];
+          b._magnetTimer = 0;
+          spawnBurst(b.x + L.bw / 2, b.y + L.bh / 2, '#E74C3C', 18);
+        }
+        return;
+      }
       b.popT = 1;
       sfx.pop();
       var burstCi = (b.boxType === 'pack' && b.packColors) ? b.packColors[0] : b.ci;
@@ -465,6 +492,9 @@ function update() {
 
   // ── Rocket updates ──
   updateRockets();
+
+  // ── Magnet updates ──
+  updateMagnetBoxes();
 
   // Belt → sort matching
   for (var si = 0; si < BELT_SLOTS; si++) {
@@ -642,6 +672,7 @@ function frame() {
     drawFunnel();
     drawStock();
     drawPhysMarbles();
+    drawMagnetEffects(); // MAGNET: draw attraction effects
     drawRocketProjectiles(); // ROCKET: draw flying projectiles
     drawBelt();
     drawBlockerProgress();

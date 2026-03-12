@@ -753,6 +753,8 @@ function editorUpdateStats() {
           } else if (tItem.type === 'blocker') {
             regularMrb[tItem.ci] += Math.max(0, editor.mrbPerBox - BLOCKER_PER_BOX);
             totalBlockers += BLOCKER_PER_BOX;
+          } else if (tItem.type === 'magnet') {
+            // MAGNET: magnet boxes have no own marbles
           } else {
             regularMrb[tItem.ci] += editor.mrbPerBox;
           }
@@ -781,6 +783,8 @@ function editorUpdateStats() {
       } else if (v.type === 'blocker') {
         regularMrb[v.ci] += Math.max(0, editor.mrbPerBox - BLOCKER_PER_BOX);
         totalBlockers += BLOCKER_PER_BOX;
+      } else if (v.type === 'magnet') {
+        // MAGNET: magnet boxes have no own marbles
       } else {
         regularMrb[v.ci] += editor.mrbPerBox;
       }
