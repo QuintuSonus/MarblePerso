@@ -4,6 +4,80 @@
 
 **Marble Sorter** is a browser-based puzzle game built with vanilla JavaScript and HTML5 Canvas. Players tap boxes on a grid to release colored marbles, which fall through a funnel onto a conveyor belt and must be sorted into matching columns. The game features 12 built-in levels, a full level editor, and multiple box mechanics (ice, hidden, blocker, pack, tunnels, rockets, walls).
 
+## Prototyping New Mechanics
+
+This project is set up as a **team prototyping tool**. Anyone can describe a new game mechanic to Claude Code and have it implemented on an isolated branch with a playable preview URL.
+
+### Quick Start
+
+Use the slash command: `/new-mechanic <describe your mechanic idea>`
+
+Example: `/new-mechanic a magnet box that attracts nearby marbles when opened`
+
+Claude will handle branching, implementation, testing, and deployment automatically.
+
+### Branch Rules
+
+- **NEVER commit directly to `main`**. Always create a feature branch.
+- Branch naming: `mechanic/<short-name>` (e.g., `mechanic/magnet-box`, `mechanic/gravity-well`)
+- One mechanic per branch. Keep changes isolated.
+- When done, push and open a PR. Do not merge without review.
+
+### Preview URLs
+
+Each `mechanic/*` branch is automatically deployed to:
+`https://quintusonus.github.io/MarblePerso/preview/<mechanic-name>/`
+
+After pushing, wait ~1 minute for the GitHub Action to deploy. Share this URL with the team for feedback.
+
+### Two-Tier Mechanic Classification
+
+**Tier 1 — Registry Box Types** (simpler, no core file changes):
+New visual/behavioral variants of boxes that use `registerBoxType()`. Only needs:
+- A new `js/box_<name>.js` file
+- A `<script>` tag in `index.html` (after `box_pack.js`, before `calibration.js`)
+- Implementation of the 4 required methods: `drawClosed`, `drawReveal`, `editorCellStyle`, `editorCellHTML`
+- See `js/box_template.js.example` for a documented starting skeleton
+- Examples: `box_default.js`, `box_hidden.js`, `box_ice.js`, `box_blocker.js`, `box_pack.js`
+
+**Tier 2 — Core Mechanics** (complex, requires core file changes):
+Mechanics that introduce new entities with their own physics, rendering, and editor UI. Requires:
+- A new `js/<mechanic>.js` file
+- Changes to `game.js` (level parsing in `startLevel`, update loop, win condition in `checkWin`)
+- Changes to `rendering.js` (new draw function called from `draw()`)
+- Changes to `editor.js` (new mode, panel, placement logic)
+- Possibly changes to `physics.js` (if interacting with marble physics)
+- A `<script>` tag in `index.html` (after `physics.js`, before `rendering.js`)
+- Study `js/rocket.js` as the canonical Tier 2 example — search for `rocket` in `game.js`, `rendering.js`, and `editor.js` to see all integration points
+- Examples: tunnels (`tunnel.js`), walls (`wall.js`), rockets (`rocket.js`)
+
+### Step-by-Step Checklist (for Claude)
+
+When implementing a new mechanic, follow these steps in order:
+
+1. **Branch**: `git checkout -b mechanic/<name> main`
+2. **Classify**: Determine if this is Tier 1 or Tier 2 (see above)
+3. **Implement**:
+   - Tier 1: Copy pattern from `js/box_default.js`, reference `js/box_template.js.example`
+   - Tier 2: List ALL files that need changes before writing any code
+4. **Script tag**: Add `<script src="js/box_<name>.js"></script>` in `index.html` at the correct position
+5. **Test level**: Create a JSON level that exercises the new mechanic (see Level Data Format below)
+6. **Commit**: Descriptive commit message explaining the mechanic
+7. **Push & PR**: Push branch, open a PR including:
+   - Description of what the mechanic does
+   - The test level JSON (so reviewers can paste it into Import Level)
+   - Preview URL: `https://quintusonus.github.io/MarblePerso/preview/<mechanic-name>/`
+
+### What NOT To Do
+
+- Do not introduce npm, build tools, TypeScript, or ES modules
+- Do not rename or reorganize existing files
+- Do not modify the registry pattern in `registry.js`
+- Do not modify other box type files (e.g., don't change `box_ice.js` when adding a new type)
+- Do not change the script load order unless adding a new file at the correct position
+
+---
+
 ## Architecture
 
 ### Tech Stack
