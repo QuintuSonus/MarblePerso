@@ -1,0 +1,119 @@
+// ============================================================
+// box_YOURTYPE.js — YOURTYPE box type
+// [One-line description of what this box type does]
+//
+// SETUP:
+// 1. Copy this file to js/box_yourtype.js
+// 2. Add <script src="js/box_yourtype.js"></script> in index.html
+//    after box_pack.js and before calibration.js
+// 3. Replace all YOURTYPE/yourtype with your type name
+// ============================================================
+
+registerBoxType('yourtype', {
+  // Display name shown in the editor toolbar
+  label: 'YourType',
+
+  // Button color in the editor toolbar
+  editorColor: '#FF6B35',
+
+  // --------------------------------------------------------
+  // drawClosed — Render the box when it hasn't been tapped yet
+  // --------------------------------------------------------
+  // ctx       : Canvas 2D rendering context
+  // x, y      : Top-left position of the box (already scaled)
+  // w, h      : Width and height of the box (already scaled)
+  // ci        : Color index (0-7). Use COLORS[ci] for fill/light/dark/glow
+  // S         : Global scale factor (use for stroke widths, font sizes, etc.)
+  // tick      : Global frame counter (for continuous animations like shimmer)
+  // idlePhase : Per-box random offset (0-1) so boxes don't animate in sync
+  // stockItem : The full stock item object (for custom properties you added)
+  drawClosed: function(ctx, x, y, w, h, ci, S, tick, idlePhase, stockItem) {
+    var c = COLORS[ci];
+    ctx.save();
+
+    // Base box (dimmed, showing color but locked)
+    ctx.globalAlpha = 0.45;
+    var grad = ctx.createLinearGradient(x, y, x, y + h);
+    grad.addColorStop(0, c.light);
+    grad.addColorStop(1, c.dark);
+    ctx.fillStyle = grad;
+    rRect(x, y, w, h, 6 * S);  // rRect = rounded rectangle path helper
+    ctx.fill();
+
+    // Desaturation overlay
+    ctx.globalAlpha = 0.25;
+    ctx.fillStyle = '#A09888';
+    rRect(x, y, w, h, 6 * S);
+    ctx.fill();
+
+    // Border
+    ctx.globalAlpha = 0.5;
+    ctx.strokeStyle = c.dark;
+    ctx.lineWidth = 1 * S;
+    rRect(x, y, w, h, 6 * S);
+    ctx.stroke();
+
+    // Lock icon
+    ctx.globalAlpha = 0.3;
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold ' + (h * 0.3) + 'px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('\uD83D\uDD12', x + w / 2, y + h / 2);
+
+    // TODO: Add your custom visual overlay here (icon, pattern, effect)
+
+    ctx.restore();
+  },
+
+  // --------------------------------------------------------
+  // drawReveal — Render the opening animation when box is tapped
+  // --------------------------------------------------------
+  // phase     : Animation progress from 0 (just tapped) to 1 (fully open)
+  // remaining : Number of marbles still inside the box
+  // Other params same as drawClosed
+  drawReveal: function(ctx, x, y, w, h, ci, S, phase, remaining, tick, stockItem) {
+    var popScale = 1 + Math.sin(phase * Math.PI) * 0.1;
+    ctx.save();
+    ctx.scale(popScale, popScale);
+
+    // Transition from closed to open state
+    if (phase < 0.5) {
+      ctx.globalAlpha = 1 - phase * 2;
+      this.drawClosed(ctx, x, y, w, h, ci, S, tick, 0, stockItem);
+      ctx.globalAlpha = phase * 2;
+    }
+
+    // Draw the open box (these are global helper functions)
+    drawBox(x, y, w, h, ci);            // Colored box background
+    ctx.globalAlpha = 1;
+    if (remaining > 0 && phase > 0.3) {
+      ctx.globalAlpha = Math.min(1, (phase - 0.3) / 0.5);
+      drawBoxMarbles(ci, remaining);    // Marble dots inside the box
+      ctx.globalAlpha = 1;
+      drawBoxLip(ci);                    // Top edge of the box
+    }
+
+    ctx.restore();
+  },
+
+  // --------------------------------------------------------
+  // editorCellStyle — Visual style for this box type in the level editor grid
+  // --------------------------------------------------------
+  // Returns { background, borderColor } CSS values
+  editorCellStyle: function(ci, gridItem) {
+    var c = COLORS[ci];
+    return {
+      background: 'linear-gradient(135deg,' + c.light + ',' + c.dark + ')',
+      borderColor: '#FF6B35'  // Match editorColor for visual consistency
+    };
+  },
+
+  // --------------------------------------------------------
+  // editorCellHTML — HTML content inside the editor grid cell
+  // --------------------------------------------------------
+  // Returns a short label (typically one letter) to identify the type
+  editorCellHTML: function(ci, gridItem) {
+    return '<span class="ed-cell-dot">T</span>';  // "T" for Template — change this!
+  }
+});
