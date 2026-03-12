@@ -6,52 +6,54 @@
 //           + Rocket mechanic support
 // ============================================================
 
-// === LEVEL SELECT ===
-function buildLevelGrid() {
-  var grid = document.getElementById('ls-grid');
-  grid.innerHTML = '';
-  for (var i = 0; i < LEVELS.length; i++) {
-    var btn = document.createElement('button');
-    btn.className = 'level-btn' + (i >= unlockedLevels ? ' locked' : '');
-    btn.style.animationDelay = (i * 0.06) + 's';
-    var clr = LEVEL_COLORS[i % LEVEL_COLORS.length];
-    btn.style.background = clr.bg;
-    btn.style.boxShadow = '0 5px 18px ' + clr.shadow;
-    if (i < unlockedLevels) {
-      var stars = '', s = levelStars[i];
-      for (var j = 0; j < 3; j++) stars += (j < s ? '\u2B50' : '\u2606');
-      btn.innerHTML = '<span class="lb-num">' + (i + 1) + '</span><span class="lb-stars">' + stars + '</span>';
-      btn.setAttribute('data-idx', i);
-      btn.addEventListener('click', function () { startLevel(parseInt(this.getAttribute('data-idx'))); });
-    } else {
-      btn.innerHTML = '<span class="lb-lock">\uD83D\uDD12</span>';
-    }
-    grid.appendChild(btn);
-  }
-}
-
-function showLevelSelect() {
+// === HOME SCREEN ===
+function showHomeScreen() {
   gameActive = false;
   editorCleanupTest();
   document.getElementById('win-screen').classList.remove('show');
-  document.getElementById('level-screen').classList.remove('hidden');
+  document.getElementById('home-screen').classList.remove('hidden');
   document.getElementById('cal-toggle').style.display = 'none';
+  document.getElementById('home-import-area').style.display = 'none';
   hideEditor();
-  buildLevelGrid();
 }
 
-function goNextLevel() {
+function replayLevel() {
   document.getElementById('win-screen').classList.remove('show');
-  if (currentLevel + 1 < LEVELS.length) startLevel(currentLevel + 1);
-  else showLevelSelect();
+  if (currentLevel >= 0 && currentLevel < LEVELS.length) startLevel(currentLevel);
+  else showHomeScreen();
 }
+
+function homeImport() {
+  var ta = document.getElementById('home-import-area');
+  if (ta.style.display === 'block' && ta.value.trim()) {
+    try {
+      var lvl = JSON.parse(ta.value);
+      if (!lvl.grid || lvl.grid.length !== 49) throw new Error('Invalid level');
+      ta.style.display = 'none';
+      playImportedLevel(lvl);
+    } catch (e) { editorShowToast('Invalid level JSON'); }
+  } else {
+    ta.style.display = 'block'; ta.value = '';
+    ta.focus();
+  }
+}
+
+function playImportedLevel(lvl) {
+  var idx = LEVELS.length;
+  LEVELS.push(lvl);
+  levelStars.push(0);
+  startLevel(idx);
+}
+
+// Keep backward compat alias
+var showLevelSelect = showHomeScreen;
 
 // === START LEVEL ===
 function startLevel(idx) {
   editorCleanupTest();
   currentLevel = idx;
   var lvl = LEVELS[idx];
-  document.getElementById('level-screen').classList.add('hidden');
+  document.getElementById('home-screen').classList.add('hidden');
   document.getElementById('cal-toggle').style.display = 'block';
   MRB_PER_BOX = lvl.mrbPerBox || 9;
   SORT_CAP = lvl.sortCap || 3;
@@ -620,9 +622,8 @@ function checkWin() {
   }
   if (!won) {
     won = true; sfx.win();
-    levelStars[currentLevel] = 3;
-    if (currentLevel + 1 < LEVELS.length && unlockedLevels <= currentLevel + 1) unlockedLevels = currentLevel + 2;
-    document.getElementById('win-msg').textContent = 'Level ' + (currentLevel + 1) + ' complete!';
+    var lvlName = LEVELS[currentLevel] ? LEVELS[currentLevel].name : 'Level';
+    document.getElementById('win-msg').textContent = lvlName + ' complete!';
     spawnConfetti(W / 2, H / 3, 60);
     setTimeout(function () { spawnConfetti(W * 0.3, H / 2, 40); }, 200);
     setTimeout(function () { spawnConfetti(W * 0.7, H / 2, 40); }, 400);
@@ -655,5 +656,5 @@ function frame() {
 
 // === BOOT ===
 resize();
-showLevelSelect();
+showHomeScreen();
 frame();

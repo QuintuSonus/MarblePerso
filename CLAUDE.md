@@ -94,9 +94,11 @@ Current types: `default`, `hidden`, `ice`, `blocker`, `pack`
 ## Game Flow
 
 ```
-Boot → resize() → showLevelSelect()
+Boot → resize() → showHomeScreen()
   │
-  ├─ Level Select: click level → startLevel(idx)
+  ├─ Home Screen: "Level Editor" or "Import Level"
+  │   ├─ Level Editor → create/edit → Test Play → startLevel(idx)
+  │   └─ Import Level → paste JSON → playImportedLevel(lvl)
   │
   ├─ Gameplay: requestAnimationFrame(frame) loop
   │   update(): physicsStep → trySpawnFromTunnels → updateRockets →
@@ -107,12 +109,12 @@ Boot → resize() → showLevelSelect()
   │            back button → particles
   │
   └─ Win: all sort boxes cleared ∧ no tunnel contents ∧ all rockets launched
-         → win screen → goNextLevel() or showLevelSelect()
+         → win screen → replayLevel() or showHomeScreen()
 ```
 
 ## Level Data Format
 
-Levels are defined in `LEVELS[]` (config.js) with: `name`, `desc`, `mrbPerBox`, `sortCap`, and a `stock` array of 49 cells. Each cell is either `null` (empty) or an object:
+Levels are created via the editor or imported as JSON. Each level has: `name`, `desc`, `mrbPerBox`, `sortCap`, and a `grid` array of 49 cells. Each cell is either `null` (empty) or an object:
 - `{ci, type}` — standard box (type: 'default', 'hidden', 'ice', 'blocker', 'pack')
 - `{tunnel: true, dir, contents[]}` — tunnel entry point
 - `{wall: true}` — wall block
@@ -154,4 +156,4 @@ npx serve .
 - **Animation phases** — follow the `*T` convention (0→1 progress) for new animations.
 - **Keep it vanilla** — no npm packages, no TypeScript, no frameworks. This is intentionally simple.
 - **Test in browser** — there are no automated tests. Verify changes by opening `index.html` and playing.
-- **Persistence** — level progress (`unlockedLevels`, `levelStars`) is stored in `localStorage`.
+- **No built-in levels** — all levels are created in the editor or imported as JSON. There is no level selector or progression system.

@@ -52,7 +52,7 @@ function editorInit() {
 function showEditor(fresh) {
   gameActive = false;
   document.getElementById('win-screen').classList.remove('show');
-  document.getElementById('level-screen').classList.add('hidden');
+  document.getElementById('home-screen').classList.add('hidden');
   document.getElementById('cal-toggle').style.display = 'none';
   document.getElementById('editor-screen').classList.remove('hidden');
   editor.visible = true;
@@ -867,7 +867,6 @@ function editorTestPlay() {
   var testIdx = LEVELS.length;
   LEVELS.push(lvl);
   levelStars.push(0);
-  if (unlockedLevels <= testIdx) unlockedLevels = testIdx + 1;
   startLevel(testIdx);
   editor._testIdx = testIdx;
 }
